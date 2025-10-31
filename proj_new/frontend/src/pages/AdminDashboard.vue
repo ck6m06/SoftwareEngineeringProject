@@ -146,6 +146,82 @@
         </div>
       </div>
 
+      <!-- 批次操作區 -->
+      <div v-if="canShowBatchOperations" class="bg-white rounded-lg shadow mb-6 p-4">
+        <div class="flex justify-between items-center flex-wrap gap-4">
+          <div class="flex items-center gap-4">
+            <span class="text-sm font-medium text-gray-700">
+              <svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              已選擇 {{ selectedAnimals.length }} 隻動物
+            </span>
+            <div class="flex gap-2">
+              <button @click="clearSelection" class="text-sm text-gray-500 hover:text-gray-700">清除選擇</button>
+              <button @click="toggleSelectAll" class="text-sm text-blue-600 hover:text-blue-700">
+                {{ isAllSelected ? '取消全選' : '全選' }}
+              </button>
+            </div>
+          </div>
+          
+          <div class="flex gap-2">
+            <button
+              v-if="currentStatus === 'SUBMITTED'"
+              @click="batchOperation('publish')"
+              :disabled="batchProcessing || selectedAnimals.length === 0"
+              class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              {{ batchProcessing ? '處理中...' : '批次核准發布' }}
+            </button>
+            
+            <button
+              v-if="currentStatus === 'SUBMITTED'"
+              @click="openBatchRejectModal"
+              :disabled="batchProcessing || selectedAnimals.length === 0"
+              class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              {{ batchProcessing ? '處理中...' : '批次拒絕' }}
+            </button>
+
+            <button
+              v-if="currentStatus === 'PUBLISHED'"
+              @click="batchOperation('retire')"
+              :disabled="batchProcessing || selectedAnimals.length === 0"
+              class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+              {{ batchProcessing ? '處理中...' : '批次下架' }}
+            </button>
+          </div>
+        </div>
+        
+        <!-- 已選動物預覽 -->
+        <div v-if="selectedAnimals.length > 0 && selectedAnimals.length <= 5" class="mt-4 pt-4 border-t border-gray-200">
+          <div class="text-sm text-gray-600 mb-2">已選中的動物：</div>
+          <div class="flex flex-wrap gap-2">
+            <div
+              v-for="animalId in selectedAnimals.slice(0, 5)"
+              :key="animalId"
+              class="inline-flex items-center gap-2 px-3 py-1 bg-blue-50 border border-blue-200 rounded-full text-sm"
+            >
+              <span>{{ getAnimalName(animalId) }}</span>
+              <button @click="toggleAnimal(animalId)" class="text-blue-600 hover:text-blue-800">×</button>
+            </div>
+            <div v-if="selectedAnimals.length > 5" class="px-3 py-1 bg-gray-100 rounded-full text-sm text-gray-600">
+              還有 {{ selectedAnimals.length - 5 }} 隻...
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Loading -->
       <div v-if="isLoading" class="text-center py-12">
         <div class="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
@@ -154,12 +230,43 @@
 
       <!-- 動物列表 -->
       <div v-else-if="animals.length > 0" class="space-y-4">
+        <!-- 列表標題和全選控制 -->
+        <div v-if="currentStatus === 'SUBMITTED' || currentStatus === 'PUBLISHED'" class="bg-white rounded-lg shadow p-4">
+          <div class="flex justify-between items-center">
+            <div class="flex items-center gap-3">
+              <input
+                type="checkbox"
+                :checked="isAllSelected"
+                :indeterminate="selectedAnimals.length > 0 && !isAllSelected"
+                @change="toggleSelectAll"
+                class="w-4 h-4 rounded border-gray-300 accent-blue-600"
+              />
+              <label @click="toggleSelectAll" class="text-sm font-medium text-gray-700 cursor-pointer">
+                {{ isAllSelected ? '取消全選' : selectedAnimals.length > 0 ? '全選' : '全選' }}
+              </label>
+            </div>
+            <div v-if="selectedAnimals.length > 0" class="text-sm text-blue-600 font-medium">
+              已選 {{ selectedAnimals.length }}/{{ animals.length }}
+            </div>
+          </div>
+        </div>
+
         <div
           v-for="animal in animals"
           :key="animal.animal_id"
           class="bg-white rounded-lg shadow hover:shadow-lg transition p-6"
+          :class="{ 'ring-2 ring-blue-500 bg-blue-50': selectedAnimals.includes(animal.animal_id) }"
         >
           <div class="flex gap-6">
+            <!-- 選擇框 -->
+            <div v-if="currentStatus === 'SUBMITTED' || currentStatus === 'PUBLISHED'" class="flex-shrink-0 pt-2">
+              <input
+                type="checkbox"
+                :checked="selectedAnimals.includes(animal.animal_id)"
+                @change="toggleAnimal(animal.animal_id)"
+                class="w-5 h-5 rounded border-gray-300 accent-blue-600"
+              />
+            </div>
             <!-- 圖片 -->
             <div class="flex-shrink-0">
               <img
@@ -320,7 +427,9 @@
     <div v-if="showRejectModal" class="modal-overlay" @click.self="closeRejectModal">
       <div class="modal-content">
         <div class="modal-header">
-          <h2 class="modal-title">拒絕批准動物上架</h2>
+          <h2 class="modal-title">
+            {{ isBatchReject ? `批次拒絕 ${selectedAnimals.length} 隻動物` : '拒絕批准動物上架' }}
+          </h2>
           <button type="button" @click="closeRejectModal" class="modal-close">
             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
@@ -329,6 +438,24 @@
         </div>
 
         <div class="modal-body">
+          <div v-if="isBatchReject" class="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <p class="text-sm text-blue-800">
+              <strong>批次操作：</strong>將對以下 {{ selectedAnimals.length }} 隻動物套用相同的拒絕原因
+            </p>
+            <div class="mt-2 flex flex-wrap gap-1">
+              <span
+                v-for="animalId in selectedAnimals.slice(0, 3)"
+                :key="animalId"
+                class="inline-block px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded"
+              >
+                {{ getAnimalName(animalId) }}
+              </span>
+              <span v-if="selectedAnimals.length > 3" class="px-2 py-1 bg-gray-100 text-gray-600 text-xs rounded">
+                +{{ selectedAnimals.length - 3 }} 隻
+              </span>
+            </div>
+          </div>
+
           <div class="mb-4">
             <label for="rejection-reason" class="form-label required">拒絕原因</label>
             <textarea 
@@ -344,7 +471,11 @@
 
           <div class="alert alert-warning mb-4">
             <p class="text-sm">
-              <strong>注意:</strong> 拒絕後動物狀態將改為草稿,送養者需修正後重新提交。
+              <strong>注意:</strong> 
+              {{ isBatchReject 
+                ? `拒絕後這 ${selectedAnimals.length} 隻動物狀態將改為草稿，送養者需修正後重新提交。`
+                : '拒絕後動物狀態將改為草稿,送養者需修正後重新提交。'
+              }}
             </p>
           </div>
 
@@ -354,9 +485,9 @@
               type="button" 
               @click="confirmReject" 
               class="btn-reject"
-              :disabled="isProcessing || !rejectionReason.trim()"
+              :disabled="isProcessing || batchProcessing || !rejectionReason.trim()"
             >
-              {{ isProcessing ? '處理中...' : '確認拒絕' }}
+              {{ isProcessing || batchProcessing ? '處理中...' : (isBatchReject ? '確認批次拒絕' : '確認拒絕') }}
             </button>
           </div>
         </div>
@@ -366,7 +497,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { getAnimals, publishAnimal as publishAnimalAPI, retireAnimal as retireAnimalAPI, rejectAnimal as rejectAnimalAPI, type Animal } from '@/api/animals'
 
@@ -375,7 +506,9 @@ const router = useRouter()
 const animals = ref<Animal[]>([])
 const isLoading = ref(false)
 const isProcessing = ref(false)
+const batchProcessing = ref(false)
 const currentStatus = ref('SUBMITTED')
+const selectedAnimals = ref<number[]>([])
 const stats = ref({
   draft: 0,
   submitted: 0,
@@ -387,6 +520,7 @@ const stats = ref({
 const showRejectModal = ref(false)
 const rejectingAnimalId = ref<number | null>(null)
 const rejectionReason = ref('')
+const isBatchReject = ref(false)
 
 const pagination = ref({
   page: 1,
@@ -401,6 +535,42 @@ const statusOptions = [
   { value: 'DRAFT', label: '草稿' },
   { value: 'RETIRED', label: '已下架' }
 ]
+
+// 批次選擇相關計算屬性
+const canShowBatchOperations = computed(() => {
+  return selectedAnimals.value.length > 0 && (currentStatus.value === 'SUBMITTED' || currentStatus.value === 'PUBLISHED')
+})
+
+const isAllSelected = computed(() => {
+  return animals.value.length > 0 && selectedAnimals.value.length === animals.value.length
+})
+
+// 批次選擇函數
+const toggleAnimal = (animalId: number) => {
+  const index = selectedAnimals.value.indexOf(animalId)
+  if (index > -1) {
+    selectedAnimals.value.splice(index, 1)
+  } else {
+    selectedAnimals.value.push(animalId)
+  }
+}
+
+const toggleSelectAll = () => {
+  if (isAllSelected.value) {
+    selectedAnimals.value = []
+  } else {
+    selectedAnimals.value = animals.value.map(animal => animal.animal_id)
+  }
+}
+
+const clearSelection = () => {
+  selectedAnimals.value = []
+}
+
+const getAnimalName = (animalId: number): string => {
+  const animal = animals.value.find(a => a.animal_id === animalId)
+  return animal?.name || `動物 #${animalId}`
+}
 
 // 載入動物列表
 async function loadAnimals() {
@@ -419,6 +589,10 @@ async function loadAnimals() {
       pages: response.pages,
       total: response.total
     }
+    
+    // 清除不在當前頁的選擇
+    const currentAnimalIds = animals.value.map(a => a.animal_id)
+    selectedAnimals.value = selectedAnimals.value.filter(id => currentAnimalIds.includes(id))
   } catch (error: any) {
     console.error('Load animals error:', error)
     alert('載入失敗: ' + (error.response?.data?.message || error.message))
@@ -465,8 +639,83 @@ async function publishAnimal(animalId: number) {
   }
 }
 
+// 批次操作函數
+async function batchOperation(operation: 'publish' | 'retire') {
+  if (selectedAnimals.value.length === 0) {
+    alert('請先選擇要操作的動物')
+    return
+  }
+
+  const operationText = operation === 'publish' ? '批次核准發布' : '批次下架'
+  const confirmText = `確定要${operationText} ${selectedAnimals.value.length} 隻動物嗎？`
+  
+  if (!confirm(confirmText)) {
+    return
+  }
+
+  batchProcessing.value = true
+
+  try {
+    let successCount = 0
+    let failedCount = 0
+    const errors: string[] = []
+
+    for (const animalId of selectedAnimals.value) {
+      try {
+        if (operation === 'publish') {
+          await publishAnimalAPI(animalId)
+        } else {
+          await retireAnimalAPI(animalId)
+        }
+        successCount++
+      } catch (error: any) {
+        failedCount++
+        const errorMsg = error.response?.data?.message || error.message || '未知錯誤'
+        errors.push(`動物 ID ${animalId}: ${errorMsg}`)
+        console.error(`${operationText}動物 ${animalId} 失敗:`, error)
+      }
+    }
+
+    // 顯示結果
+    let message = `${operationText}完成！\n成功: ${successCount} 隻\n失敗: ${failedCount} 隻`
+    if (errors.length > 0) {
+      message += `\n\n錯誤詳情:\n${errors.slice(0, 3).join('\n')}`
+      if (errors.length > 3) {
+        message += `\n... 還有 ${errors.length - 3} 個錯誤`
+      }
+    }
+    alert(message)
+
+    selectedAnimals.value = []
+    
+    // 重新載入數據
+    await loadAnimals()
+    await loadStats()
+
+  } catch (error: any) {
+    console.error(`${operationText}錯誤:`, error)
+    alert(`${operationText}失敗: ${error.message}`)
+  } finally {
+    batchProcessing.value = false
+  }
+}
+
+// 批次拒絕函數
+function openBatchRejectModal() {
+  if (selectedAnimals.value.length === 0) {
+    alert('請先選擇要拒絕的動物')
+    return
+  }
+  
+  isBatchReject.value = true
+  rejectingAnimalId.value = null
+  rejectionReason.value = ''
+  showRejectModal.value = true
+}
+
 // 不核准動物 - 開啟拒絕原因 Modal (問題4、問題5)
 function openRejectModal(animalId: number) {
+  isBatchReject.value = false
   rejectingAnimalId.value = animalId
   rejectionReason.value = ''
   showRejectModal.value = true
@@ -476,28 +725,75 @@ function closeRejectModal() {
   showRejectModal.value = false
   rejectingAnimalId.value = null
   rejectionReason.value = ''
+  isBatchReject.value = false
 }
 
 async function confirmReject() {
-  if (!rejectingAnimalId.value) return
-  
   if (!rejectionReason.value.trim()) {
     alert('請輸入拒絕原因')
     return
   }
   
-  isProcessing.value = true
-  try {
-    await rejectAnimalAPI(rejectingAnimalId.value, rejectionReason.value.trim())
-    alert('已拒絕批准,並已通知送養者')
-    closeRejectModal()
-    await loadAnimals()
-    await loadStats()
-  } catch (error: any) {
-    console.error('Reject error:', error)
-    alert('拒絕失敗: ' + (error.response?.data?.message || error.message))
-  } finally {
-    isProcessing.value = false
+  if (isBatchReject.value) {
+    // 批次拒絕
+    if (selectedAnimals.value.length === 0) return
+    
+    batchProcessing.value = true
+    try {
+      let successCount = 0
+      let failedCount = 0
+      const errors: string[] = []
+
+      for (const animalId of selectedAnimals.value) {
+        try {
+          await rejectAnimalAPI(animalId, rejectionReason.value.trim())
+          successCount++
+        } catch (error: any) {
+          failedCount++
+          const errorMsg = error.response?.data?.message || error.message || '未知錯誤'
+          errors.push(`動物 ID ${animalId}: ${errorMsg}`)
+          console.error(`批次拒絕動物 ${animalId} 失敗:`, error)
+        }
+      }
+
+      // 顯示結果
+      let message = `批次拒絕完成！\n成功: ${successCount} 隻\n失敗: ${failedCount} 隻`
+      if (errors.length > 0) {
+        message += `\n\n錯誤詳情:\n${errors.slice(0, 3).join('\n')}`
+        if (errors.length > 3) {
+          message += `\n... 還有 ${errors.length - 3} 個錯誤`
+        }
+      }
+      alert(message)
+
+      selectedAnimals.value = []
+      closeRejectModal()
+      await loadAnimals()
+      await loadStats()
+
+    } catch (error: any) {
+      console.error('批次拒絕錯誤:', error)
+      alert('批次拒絕失敗: ' + error.message)
+    } finally {
+      batchProcessing.value = false
+    }
+  } else {
+    // 單個拒絕
+    if (!rejectingAnimalId.value) return
+    
+    isProcessing.value = true
+    try {
+      await rejectAnimalAPI(rejectingAnimalId.value, rejectionReason.value.trim())
+      alert('已拒絕批准,並已通知送養者')
+      closeRejectModal()
+      await loadAnimals()
+      await loadStats()
+    } catch (error: any) {
+      console.error('Reject error:', error)
+      alert('拒絕失敗: ' + (error.response?.data?.message || error.message))
+    } finally {
+      isProcessing.value = false
+    }
   }
 }
 

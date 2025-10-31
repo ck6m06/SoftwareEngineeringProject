@@ -46,27 +46,105 @@
 
           <!-- 已登入狀態 -->
           <template v-else>
-            <router-link
-              to="/rehome-form"
-              class="text-gray-700 hover:text-blue-600 transition"
-              active-class="text-blue-600 font-semibold"
-            >
-              送養
-            </router-link>
-            <router-link
-              to="/my-rehomes"
-              class="text-gray-700 hover:text-blue-600 transition"
-              active-class="text-blue-600 font-semibold"
-            >
-              我的送養
-            </router-link>
-            <router-link
-              to="/my/applications"
-              class="text-gray-700 hover:text-blue-600 transition"
-              active-class="text-blue-600 font-semibold"
-            >
-              我的申請
-            </router-link>
+            <!-- 收容所成員的主要功能 -->
+            <template v-if="authStore.user?.role === 'SHELTER_MEMBER'">
+              <router-link
+                to="/shelter/dashboard"
+                class="text-gray-700 hover:text-blue-600 transition"
+                active-class="text-blue-600 font-semibold"
+                title="批次匯入動物資料"
+              >
+                批次送養
+              </router-link>
+              <router-link
+                to="/shelter/animals"
+                class="text-gray-700 hover:text-blue-600 transition"
+                active-class="text-blue-600 font-semibold"
+              >
+                動物管理
+              </router-link>
+              <router-link
+                to="/shelter/applications"
+                class="text-gray-700 hover:text-blue-600 transition"
+                active-class="text-blue-600 font-semibold"
+              >
+                領養申請管理
+              </router-link>
+              <router-link
+                to="/medical-records"
+                class="text-gray-700 hover:text-blue-600 transition"
+                active-class="text-blue-600 font-semibold"
+              >
+                醫療管理
+              </router-link>
+              <router-link
+                to="/rehome-form"
+                class="text-gray-700 hover:text-blue-600 transition"
+                active-class="text-blue-600 font-semibold"
+                title="收容所單次送養表單"
+              >
+                單次送養
+              </router-link>
+              <router-link
+                to="/my/applications"
+                class="text-gray-700 hover:text-blue-600 transition"
+                active-class="text-blue-600 font-semibold"
+              >
+                我的申請
+              </router-link>
+            </template>
+
+            <!-- 平台管理員功能 -->
+            <template v-else-if="authStore.user?.role === 'ADMIN'">
+              <router-link
+                to="/admin/dashboard"
+                class="text-gray-700 hover:text-blue-600 transition"
+                active-class="text-blue-600 font-semibold"
+                title="平台管理後台"
+              >
+                管理後台
+              </router-link>
+              <router-link
+                to="/my/applications"
+                class="text-gray-700 hover:text-blue-600 transition"
+                active-class="text-blue-600 font-semibold"
+              >
+                我的申請
+              </router-link>
+            </template>
+            
+            <!-- 一般用戶功能 -->
+            <template v-else>
+              <router-link
+                to="/rehome-form"
+                class="text-gray-700 hover:text-blue-600 transition"
+                active-class="text-blue-600 font-semibold"
+              >
+                送養
+              </router-link>
+              <router-link
+                to="/my-rehomes"
+                class="text-gray-700 hover:text-blue-600 transition"
+                active-class="text-blue-600 font-semibold"
+              >
+                我的送養
+              </router-link>
+              <router-link
+                to="/my/applications"
+                class="text-gray-700 hover:text-blue-600 transition"
+                active-class="text-blue-600 font-semibold"
+              >
+                我的申請
+              </router-link>
+              <router-link
+                to="/applications"
+                class="text-gray-700 hover:text-blue-600 transition"
+                active-class="text-blue-600 font-semibold"
+                title="審核我的動物的領養申請"
+              >
+                審核管理
+              </router-link>
+            </template>
 
             <!-- 通知鈴鐺 -->
             <NotificationBell />
@@ -107,31 +185,48 @@
                   👤 個人資料
                 </router-link>
 
-                <router-link
-                  to="/admin/applications"
-                  class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                  @click="showUserMenu = false"
-                >
-                  📋 領養申請管理
-                </router-link>
+                <!-- 收容所成員功能 -->
+                <template v-if="authStore.user?.role === 'SHELTER_MEMBER'">
+                  <div class="border-t border-gray-200 my-1"></div>
+                  <router-link
+                    to="/shelter/applications"
+                    class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    @click="showUserMenu = false"
+                  >
+                    📋 審核管理
+                  </router-link>
+                  <router-link
+                    to="/shelter/animals"
+                    class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    @click="showUserMenu = false"
+                  >
+                    🐾 動物管理
+                  </router-link>
+                </template>
 
-                <router-link
-                  v-if="authStore.user?.role === 'SHELTER_MEMBER'"
-                  to="/shelter/dashboard"
-                  class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                  @click="showUserMenu = false"
-                >
-                  收容所管理
-                </router-link>
+                <!-- 一般會員功能（個人送養者） -->
+                <template v-if="authStore.user?.role === 'GENERAL_MEMBER'">
+                  <div class="border-t border-gray-200 my-1"></div>
+                  <router-link
+                    to="/applications"
+                    class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    @click="showUserMenu = false"
+                  >
+                    📋 審核管理
+                  </router-link>
+                </template>
 
-                <router-link
-                  v-if="authStore.user?.role === 'ADMIN'"
-                  to="/admin/dashboard"
-                  class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                  @click="showUserMenu = false"
-                >
-                  管理後台
-                </router-link>
+                <!-- 管理員專用功能 -->
+                <template v-if="authStore.user?.role === 'ADMIN'">
+                  <div class="border-t border-gray-200 my-1"></div>
+                  <router-link
+                    to="/admin/dashboard"
+                    class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    @click="showUserMenu = false"
+                  >
+                    🔧 管理後台
+                  </router-link>
+                </template>
 
                 <button
                   @click="handleLogout"
@@ -210,7 +305,11 @@
           <div class="px-3 py-2 border-b border-gray-200">
             <p class="text-sm text-gray-500">已登入為</p>
             <p class="font-semibold text-gray-900">{{ authStore.user?.username || authStore.user?.email }}</p>
+            <p class="text-xs text-gray-500">
+              {{ getRoleText(authStore.user?.role) }}
+            </p>
           </div>
+          
           <router-link
             to="/profile"
             class="block px-3 py-2 rounded-md text-gray-700 hover:bg-gray-100"
@@ -218,50 +317,103 @@
           >
             👤 個人資料
           </router-link>
-          <router-link
-            to="/rehome-form"
-            class="block px-3 py-2 rounded-md text-gray-700 hover:bg-gray-100"
-            @click="showMobileMenu = false"
-          >
-            送養
-          </router-link>
-          <router-link
-            to="/my-rehomes"
-            class="block px-3 py-2 rounded-md text-gray-700 hover:bg-gray-100"
-            @click="showMobileMenu = false"
-          >
-            我的送養
-          </router-link>
-          <router-link
-            to="/my/applications"
-            class="block px-3 py-2 rounded-md text-gray-700 hover:bg-gray-100"
-            @click="showMobileMenu = false"
-          >
-            我的申請
-          </router-link>
-          <router-link
-            to="/admin/applications"
-            class="block px-3 py-2 rounded-md text-gray-700 hover:bg-gray-100"
-            @click="showMobileMenu = false"
-          >
-            領養申請管理
-          </router-link>
-          <router-link
-            v-if="authStore.user?.role === 'SHELTER_MEMBER'"
-            to="/shelter/dashboard"
-            class="block px-3 py-2 rounded-md text-gray-700 hover:bg-gray-100"
-            @click="showMobileMenu = false"
-          >
-            收容所管理
-          </router-link>
-          <router-link
-            v-if="authStore.user?.role === 'ADMIN'"
-            to="/admin/dashboard"
-            class="block px-3 py-2 rounded-md text-gray-700 hover:bg-gray-100"
-            @click="showMobileMenu = false"
-          >
-            管理後台
-          </router-link>
+          
+          <!-- 收容所成員功能 -->
+          <template v-if="authStore.user?.role === 'SHELTER_MEMBER'">
+            <router-link
+              to="/shelter/dashboard"
+              class="block px-3 py-2 rounded-md text-gray-700 hover:bg-gray-100"
+              @click="showMobileMenu = false"
+            >
+              ⚡ 批次送養
+            </router-link>
+            <router-link
+              to="/shelter/animals"
+              class="block px-3 py-2 rounded-md text-gray-700 hover:bg-gray-100"
+              @click="showMobileMenu = false"
+            >
+              🐾 動物管理
+            </router-link>
+            <router-link
+              to="/shelter/applications"
+              class="block px-3 py-2 rounded-md text-gray-700 hover:bg-gray-100"
+              @click="showMobileMenu = false"
+            >
+              📋 領養申請管理
+            </router-link>
+            <router-link
+              to="/medical-records"
+              class="block px-3 py-2 rounded-md text-gray-700 hover:bg-gray-100"
+              @click="showMobileMenu = false"
+            >
+              🏥 醫療管理
+            </router-link>
+            <router-link
+              to="/rehome-form"
+              class="block px-3 py-2 rounded-md text-gray-700 hover:bg-gray-100"
+              @click="showMobileMenu = false"
+            >
+              單次送養
+            </router-link>
+            <router-link
+              to="/my/applications"
+              class="block px-3 py-2 rounded-md text-gray-700 hover:bg-gray-100"
+              @click="showMobileMenu = false"
+            >
+              我的申請
+            </router-link>
+          </template>
+          
+          <!-- 一般會員功能（個人送養者） -->
+          <template v-if="authStore.user?.role === 'GENERAL_MEMBER'">
+            <router-link
+              to="/rehome-form"
+              class="block px-3 py-2 rounded-md text-gray-700 hover:bg-gray-100"
+              @click="showMobileMenu = false"
+            >
+              送養
+            </router-link>
+            <router-link
+              to="/my-rehomes"
+              class="block px-3 py-2 rounded-md text-gray-700 hover:bg-gray-100"
+              @click="showMobileMenu = false"
+            >
+              我的送養
+            </router-link>
+            <router-link
+              to="/my/applications"
+              class="block px-3 py-2 rounded-md text-gray-700 hover:bg-gray-100"
+              @click="showMobileMenu = false"
+            >
+              我的申請
+            </router-link>
+            <router-link
+              to="/applications"
+              class="block px-3 py-2 rounded-md text-gray-700 hover:bg-gray-100"
+              @click="showMobileMenu = false"
+            >
+              📋 審核管理
+            </router-link>
+          </template>
+          
+          <!-- 管理員功能 -->
+          <template v-if="authStore.user?.role === 'ADMIN'">
+            <router-link
+              to="/admin/dashboard"
+              class="block px-3 py-2 rounded-md text-gray-700 hover:bg-gray-100"
+              @click="showMobileMenu = false"
+            >
+              🔧 管理後台
+            </router-link>
+            <router-link
+              to="/my/applications"
+              class="block px-3 py-2 rounded-md text-gray-700 hover:bg-gray-100"
+              @click="showMobileMenu = false"
+            >
+              我的申請
+            </router-link>
+          </template>
+          
           <button
             @click="handleLogout"
             class="block w-full text-left px-3 py-2 rounded-md text-red-600 hover:bg-gray-100"

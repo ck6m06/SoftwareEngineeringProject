@@ -9,6 +9,7 @@
 
       <!-- 搜尋與篩選區域 -->
       <div class="bg-white p-6 rounded-lg shadow-md mb-8">
+        <!-- 第一排 - 基本篩選 -->
         <div class="grid md:grid-cols-4 gap-4">
           <!-- 搜尋關鍵字 -->
           <div class="md:col-span-2">
@@ -47,6 +48,73 @@
               <option value="">全部</option>
               <option value="MALE">公</option>
               <option value="FEMALE">母</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- 第二排 - 進階篩選 -->
+        <div class="grid md:grid-cols-4 gap-4 mt-4">
+          <!-- 年齡篩選 -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">年齡</label>
+            <select
+              v-model="ageRange"
+              class="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              @change="handleAgeChange"
+            >
+              <option value="">全部年齡</option>
+              <option value="0-6">幼年 (0-6個月)</option>
+              <option value="6-12">青少年 (6個月-1歲)</option>
+              <option value="12-36">成年 (1-3歲)</option>
+              <option value="36-84">中年 (3-7歲)</option>
+              <option value="84-999">老年 (7歲以上)</option>
+            </select>
+          </div>
+
+          <!-- 地區篩選 -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">地區</label>
+            <select
+              v-model="filters.region"
+              class="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              @change="handleSearch"
+            >
+              <option value="">全部地區</option>
+              <option value="台北市">台北市</option>
+              <option value="新北市">新北市</option>
+              <option value="桃園市">桃園市</option>
+              <option value="台中市">台中市</option>
+              <option value="台南市">台南市</option>
+              <option value="高雄市">高雄市</option>
+              <option value="新竹市">新竹市</option>
+              <option value="新竹縣">新竹縣</option>
+              <option value="苗栗縣">苗栗縣</option>
+              <option value="彰化縣">彰化縣</option>
+              <option value="南投縣">南投縣</option>
+              <option value="雲林縣">雲林縣</option>
+              <option value="嘉義市">嘉義市</option>
+              <option value="嘉義縣">嘉義縣</option>
+              <option value="屏東縣">屏東縣</option>
+              <option value="宜蘭縣">宜蘭縣</option>
+              <option value="花蓮縣">花蓮縣</option>
+              <option value="台東縣">台東縣</option>
+              <option value="澎湖縣">澎湖縣</option>
+              <option value="金門縣">金門縣</option>
+              <option value="連江縣">連江縣</option>
+            </select>
+          </div>
+
+          <!-- 來源篩選 -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">來源</label>
+            <select
+              v-model="filters.source_type"
+              class="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              @change="handleSearch"
+            >
+              <option value="">全部來源</option>
+              <option value="shelter">收容所</option>
+              <option value="personal">個人送養</option>
             </select>
           </div>
         </div>
@@ -137,11 +205,16 @@ import AnimalCard from '@/components/animals/AnimalCard.vue'
 const animals = ref<Animal[]>([])
 const isLoading = ref(false)
 const error = ref('')
+const ageRange = ref('')
 
 const filters = reactive<AnimalFilters>({
   q: '',
   species: undefined,
   sex: undefined,
+  region: undefined,
+  source_type: undefined,
+  min_age: undefined,
+  max_age: undefined,
   status: 'PUBLISHED',  // 只顯示已發布的
   page: 1,
   per_page: 12,
@@ -181,11 +254,29 @@ function handleSearch() {
   loadAnimals()
 }
 
+// 處理年齡範圍變更
+function handleAgeChange() {
+  if (ageRange.value === '') {
+    filters.min_age = undefined
+    filters.max_age = undefined
+  } else {
+    const [min, max] = ageRange.value.split('-').map(Number)
+    filters.min_age = min
+    filters.max_age = max === 999 ? undefined : max  // 999 表示無上限
+  }
+  handleSearch()
+}
+
 // 清除篩選
 function handleReset() {
   filters.q = ''
   filters.species = undefined
   filters.sex = undefined
+  filters.region = undefined
+  filters.source_type = undefined
+  filters.min_age = undefined
+  filters.max_age = undefined
+  ageRange.value = ''
   filters.page = 1
   loadAnimals()
 }

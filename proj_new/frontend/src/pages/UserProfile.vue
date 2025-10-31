@@ -102,6 +102,73 @@
                 />
               </div>
 
+              <!-- 地區 -->
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">縣市</label>
+                <select
+                  v-model="profileForm.region"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">請選擇縣市</option>
+                  <option v-for="region in taiwanRegions" :key="region" :value="region">
+                    {{ region }}
+                  </option>
+                </select>
+              </div>
+
+              <!-- 詳細地址 (僅收容所會員顯示) -->
+              <div v-if="user?.role === 'SHELTER_MEMBER'" class="space-y-4">
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 mb-1">
+                    詳細地址 <span class="text-red-500">*</span>
+                    <span class="text-xs text-gray-500">(收容所必填)</span>
+                  </label>
+                  <div class="space-y-2">
+                    <input
+                      v-model="profileForm.address.district"
+                      type="text"
+                      placeholder="區/鄉/鎮/市"
+                      class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <input
+                      v-model="profileForm.address.street"
+                      type="text"
+                      placeholder="街道地址"
+                      class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <input
+                      v-model="profileForm.address.postal_code"
+                      type="text"
+                      placeholder="郵遞區號"
+                      class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <!-- 一般用戶地址 (可選) -->
+              <div v-else-if="user?.role === 'GENERAL_MEMBER'" class="space-y-4">
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 mb-1">
+                    詳細地址 (可選)
+                  </label>
+                  <div class="space-y-2">
+                    <input
+                      v-model="profileForm.address.district"
+                      type="text"
+                      placeholder="區/鄉/鎮/市"
+                      class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <input
+                      v-model="profileForm.address.street"
+                      type="text"
+                      placeholder="街道地址"
+                      class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
               <!-- 角色 (唯讀) -->
               <div>
                 <label class="block text-sm font-medium text-gray-700 mb-1">帳號類型</label>
@@ -342,6 +409,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { getUser, updateUser, changePassword, requestDataExport, requestAccountDeletion, type UserUpdateData, type ChangePasswordData } from '@/api/users'
+import { updateShelter, getShelter } from '@/api/shelters'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -369,12 +437,26 @@ const tabs = [
 ]
 
 // 表單資料
-const profileForm = ref<UserUpdateData>({
+const profileForm = ref<UserUpdateData & { region?: string; address: any }>({
   username: '',
   phone_number: '',
   first_name: '',
-  last_name: ''
+  last_name: '',
+  region: '',
+  address: {
+    district: '',
+    street: '',
+    postal_code: ''
+  }
 })
+
+// 台灣縣市列表
+const taiwanRegions = [
+  '台北市', '新北市', '桃園市', '台中市', '台南市', '高雄市',
+  '基隆市', '新竹市', '嘉義市',
+  '新竹縣', '苗栗縣', '彰化縣', '南投縣', '雲林縣', '嘉義縣',
+  '屏東縣', '宜蘭縣', '花蓮縣', '台東縣', '澎湖縣', '金門縣', '連江縣'
+]
 
 const passwordForm = ref<ChangePasswordData & { confirm_password: string }>({
   old_password: '',
@@ -398,12 +480,45 @@ const loadUser = async () => {
     user.value = await getUser(authStore.user.user_id)
     console.log('✅ 使用者資料載入成功:', user.value)
     
-    // 填充表單
+    // 填充表單 - 基本資料來自用戶
     profileForm.value = {
       username: user.value.username || '',
       phone_number: user.value.phone_number || '',
       first_name: user.value.first_name || '',
-      last_name: user.value.last_name || ''
+      last_name: user.value.last_name || '',
+      region: '',
+      address: {
+        district: '',
+        street: '',
+        postal_code: ''
+      }
+    }
+    
+    // 收容所會員：載入收容所的地區和地址資料
+    if (user.value.role === 'SHELTER_MEMBER' && user.value.primary_shelter_id) {
+      try {
+        const shelterData = await getShelter(user.value.primary_shelter_id)
+        console.log('✅ 收容所資料載入成功:', shelterData)
+        
+        // 使用收容所的地區和地址資料
+        profileForm.value.region = shelterData.region || ''
+        profileForm.value.address = shelterData.address || {
+          district: '',
+          street: '',
+          postal_code: ''
+        }
+      } catch (shelterErr: any) {
+        console.error('❌ 載入收容所資料失敗:', shelterErr)
+        // 收容所資料載入失敗不影響主要功能，只記錄錯誤
+      }
+    } else {
+      // 一般用戶：使用用戶的地區和地址資料
+      profileForm.value.region = user.value.region || ''
+      profileForm.value.address = user.value.address || {
+        district: '',
+        street: '',
+        postal_code: ''
+      }
     }
   } catch (err: any) {
     console.error('❌ 載入使用者資料失敗:', err)
@@ -421,8 +536,30 @@ const updateProfile = async () => {
   saving.value = true
 
   try {
-    user.value = await updateUser(authStore.user.user_id, profileForm.value)
-    showSuccess('個人資料已更新')
+    // 收容所會員需要分別更新用戶和收容所資料
+    if (user.value?.role === 'SHELTER_MEMBER' && user.value?.primary_shelter_id) {
+      // 1. 更新用戶基本資料 (username, first_name, last_name, phone_number)
+      const userUpdateData = {
+        username: profileForm.value.username,
+        first_name: profileForm.value.first_name,
+        last_name: profileForm.value.last_name,
+        phone_number: profileForm.value.phone_number
+      }
+      user.value = await updateUser(authStore.user.user_id, userUpdateData)
+      
+      // 2. 更新收容所地區和地址資料
+      const shelterUpdateData = {
+        region: profileForm.value.region,
+        address: profileForm.value.address
+      }
+      await updateShelter(user.value.primary_shelter_id, shelterUpdateData)
+      
+      showSuccess('收容所資料已更新')
+    } else {
+      // 一般用戶更新所有資料到用戶表
+      user.value = await updateUser(authStore.user.user_id, profileForm.value)
+      showSuccess('個人資料已更新')
+    }
     
     // 更新 auth store
     if (authStore.user) {
@@ -513,7 +650,13 @@ const resetProfileForm = () => {
       username: user.value.username || '',
       phone_number: user.value.phone_number || '',
       first_name: user.value.first_name || '',
-      last_name: user.value.last_name || ''
+      last_name: user.value.last_name || '',
+      region: user.value.region || '',
+      address: user.value.address || {
+        district: '',
+        street: '',
+        postal_code: ''
+      }
     }
   }
 }

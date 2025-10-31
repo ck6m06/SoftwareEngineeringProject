@@ -66,6 +66,7 @@ export interface Shelter {
     county?: string
     postal_code?: string
   }
+  region?: string
   verified: boolean
   primary_account_user_id?: number
   created_at: string

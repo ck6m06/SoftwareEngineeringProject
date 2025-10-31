@@ -64,7 +64,7 @@ def update_user(user_id):
         
         # 可更新的欄位
         allowed_fields = ['username', 'phone_number', 'first_name', 'last_name', 
-                         'profile_photo_url', 'settings']
+                         'profile_photo_url', 'settings', 'region', 'address']
         
         # 管理員可以更新額外欄位
         if current_user.role == UserRole.ADMIN:

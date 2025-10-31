@@ -213,7 +213,7 @@ def list_all_animals():
         'total': pagination.total,
         'page': page,
         'per_page': per_page,
-        'animals': [animal.to_dict() for animal in pagination.items]
+        'animals': [animal.to_dict(include_relations=True) for animal in pagination.items]
     }), 200
 
 

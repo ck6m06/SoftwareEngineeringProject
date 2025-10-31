@@ -170,9 +170,9 @@ async function fetchApplications() {
 
   try {
     const filters: any = {
+      mode: 'my',  // 使用我的申請模式
       page: currentPage.value,
-      per_page: perPage,
-      applicant_id: authStore.user?.user_id  // 明確傳遞當前用戶 ID,確保只顯示自己的申請
+      per_page: perPage
     }
     
     if (currentStatus.value) {

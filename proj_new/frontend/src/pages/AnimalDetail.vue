@@ -73,7 +73,9 @@
             </h1>
 
             <!-- 基本資訊 -->
-            <div class="space-y-3 mb-6">
+            <div class="space-y-4 mb-6">
+              <h2 class="text-xl font-bold text-gray-900 border-b-2 border-blue-500 pb-2 mb-4">📋 基本資訊</h2>
+              
               <div class="flex items-center text-gray-700">
                 <span class="w-24 font-medium">物種:</span>
                 <span>{{ speciesText }} {{ animal.breed ? `(${animal.breed})` : '' }}</span>
@@ -86,23 +88,161 @@
                 <span class="w-24 font-medium">年齡:</span>
                 <span>{{ age }}</span>
               </div>
-              <div class="flex items-center text-gray-700">
-                <span class="w-24 font-medium">來源:</span>
-                <span v-if="animal.shelter_id">🏠 收容所</span>
-                <span v-else-if="animal.owner_id">👤 個人送養</span>
+            </div>
+
+            <!-- 來源資訊 -->
+            <div class="space-y-4 mb-6">
+              <h2 class="text-xl font-bold text-gray-900 border-b-2 border-green-500 pb-2 mb-4">🏠 來源資訊</h2>
+              
+              <div v-if="animal.shelter_id" class="bg-green-50 border border-green-200 rounded-lg p-4">
+                <div class="flex items-center gap-2 mb-3">
+                  <span class="text-2xl">🏠</span>
+                  <span class="text-lg font-semibold text-green-800">收容所</span>
+                </div>
+                <div v-if="shelterInfo" class="space-y-2 text-sm">
+                  <div class="flex items-center gap-2 text-gray-700">
+                    <span class="text-green-600">📍</span>
+                    <span class="font-medium">地區：</span>
+                    <span>{{ shelterInfo.region || '無' }}</span>
+                  </div>
+                  <div v-if="shelterInfo.address && shelterInfo.address.street" class="flex items-center gap-2 text-gray-700">
+                    <span class="text-green-600">🏠</span>
+                    <span class="font-medium">地址：</span>
+                    <span>{{ formatAddress(shelterInfo.address) }}</span>
+                  </div>
+                  <div class="flex items-center gap-2 text-gray-700">
+                    <span class="text-green-600">🏢</span>
+                    <span class="font-medium">機構名稱：</span>
+                    <span class="font-semibold text-green-800">{{ shelterInfo.name }}</span>
+                  </div>
+                </div>
+                <div v-else class="text-sm text-gray-500">載入中...</div>
+              </div>
+              
+              <div v-else-if="animal.owner_id" class="bg-green-50 border border-green-200 rounded-lg p-4">
+                <div class="flex items-center gap-2 mb-3">
+                  <span class="text-2xl">👤</span>
+                  <span class="text-lg font-semibold text-green-800">個人送養</span>
+                </div>
+                <div v-if="ownerInfo" class="space-y-2 text-sm">
+                  <div class="flex items-center gap-2 text-gray-700">
+                    <span class="text-green-600">📍</span>
+                    <span class="font-medium">地區：</span>
+                    <span>{{ ownerInfo.region || '無' }}</span>
+                  </div>
+                  <div class="flex items-center gap-2 text-gray-700">
+                    <span class="text-green-600">👤</span>
+                    <span class="font-medium">送養人：</span>
+                    <span class="font-semibold text-green-800">{{ ownerInfo.username || '匿名' }}</span>
+                  </div>
+                </div>
+                <div v-else class="text-sm text-gray-500">載入中...</div>
+              </div>
+              
+              <div v-else class="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                <div class="text-sm text-gray-500">來源資訊不明</div>
               </div>
             </div>
 
             <!-- 描述 -->
             <div v-if="animal.description" class="mb-6">
-              <h2 class="text-xl font-bold text-gray-900 mb-3">關於我</h2>
+              <h2 class="text-xl font-bold text-gray-900 border-b-2 border-purple-500 pb-2 mb-4">💝 關於我</h2>
               <p class="text-gray-700 leading-relaxed whitespace-pre-wrap">{{ animal.description }}</p>
             </div>
 
             <!-- 醫療摘要 -->
             <div v-if="animal.medical_summary" class="mb-6">
-              <h2 class="text-xl font-bold text-gray-900 mb-3">健康狀況</h2>
+              <h2 class="text-xl font-bold text-gray-900 border-b-2 border-red-500 pb-2 mb-4">❤️ 健康狀況</h2>
               <p class="text-gray-700 leading-relaxed">{{ animal.medical_summary }}</p>
+            </div>
+
+            <!-- 詳細醫療記錄 -->
+            <div class="mb-6">
+              <h2 class="text-xl font-bold text-gray-900 border-b-2 border-orange-500 pb-2 mb-4">🏥 醫療記錄</h2>
+              
+              <!-- 載入中 -->
+              <div v-if="isLoadingMedical" class="text-center py-4">
+                <div class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                <span class="ml-2 text-gray-600">載入醫療記錄中...</span>
+              </div>
+
+              <!-- 錯誤訊息 -->
+              <div v-else-if="medicalError" class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+                {{ medicalError }}
+              </div>
+
+              <!-- 醫療記錄列表 -->
+              <div v-else-if="medicalRecords.length > 0" class="space-y-4">
+                <div
+                  v-for="record in displayedMedicalRecords"
+                  :key="record.medical_record_id"
+                  class="bg-gray-50 border border-gray-200 rounded-lg p-4"
+                >
+                  <div class="flex items-start justify-between mb-2">
+                    <div class="flex items-center gap-2">
+                      <span
+                        class="inline-block px-2 py-1 text-xs font-semibold rounded-full"
+                        :class="getMedicalRecordTypeClass(record.record_type)"
+                      >
+                        {{ getMedicalRecordTypeText(record.record_type) }}
+                      </span>
+                      <!-- 驗證狀態標籤 -->
+                      <span
+                        v-if="record.verified"
+                        class="inline-block px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800"
+                      >
+                        ✓ 已驗證
+                      </span>
+                      <span
+                        v-else
+                        class="inline-block px-2 py-1 text-xs font-semibold rounded-full bg-orange-100 text-orange-800"
+                      >
+                        ⚠ 未驗證
+                      </span>
+                    </div>
+                    <span v-if="record.date" class="text-sm text-gray-500">
+                      {{ formatMedicalDate(record.date) }}
+                    </span>
+                  </div>
+
+                  <div class="text-sm text-gray-600 mb-2">
+                    <strong>醫療機構:</strong> {{ record.provider || '無' }}
+                  </div>
+
+                  <div class="text-sm text-gray-600">
+                    <strong>詳細說明:</strong> {{ record.details || '無' }}
+                  </div>
+                </div>
+
+                <!-- 摺疊/展開按鈕 -->
+                <div v-if="shouldShowCollapseButton" class="text-center pt-2">
+                  <button
+                    @click="showAllMedicalRecords = !showAllMedicalRecords"
+                    class="inline-flex items-center gap-2 px-4 py-2 text-sm text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition"
+                  >
+                    <span v-if="showAllMedicalRecords">
+                      收起 ({{ sortedMedicalRecords.length - 3 }} 筆)
+                    </span>
+                    <span v-else>
+                      顯示更多 ({{ sortedMedicalRecords.length - 3 }} 筆)
+                    </span>
+                    <svg
+                      class="w-4 h-4 transition-transform"
+                      :class="{ 'rotate-180': showAllMedicalRecords }"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              <!-- 無醫療記錄訊息 -->
+              <div v-else class="text-center py-4 text-gray-500">
+                目前沒有醫療記錄
+              </div>
             </div>
 
             <!-- 行動按鈕 -->
@@ -140,7 +280,7 @@
                 class="px-6 py-3 border-2 border-blue-600 text-blue-600 rounded-lg font-semibold hover:bg-blue-50 transition"
                 :class="{ 'flex-1': isMyAnimal || animal.status === 'ADOPTED' }"
               >
-                編輯
+                {{ getEditButtonText }}
               </button>
             </div>
           </div>
@@ -376,7 +516,11 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getAnimal, type Animal } from '@/api/animals'
 import { createApplication } from '@/api/applications'
+import { getMedicalRecords } from '@/api/medicalRecords'
+import { getShelter } from '@/api/shelters'
+import { getUser } from '@/api/users'
 import { useAuthStore } from '@/stores/auth'
+import type { MedicalRecord } from '@/types/models'
 
 const route = useRoute()
 const router = useRouter()
@@ -386,6 +530,17 @@ const animal = ref<Animal | null>(null)
 const isLoading = ref(false)
 const error = ref('')
 const currentImageIndex = ref(0)
+
+// 來源詳細資訊
+const shelterInfo = ref<any>(null)
+const ownerInfo = ref<any>(null)
+
+// 醫療記錄相關
+const medicalRecords = ref<MedicalRecord[]>([])
+const isLoadingMedical = ref(false)
+const medicalError = ref('')
+const showAllMedicalRecords = ref(false)
+
 
 // 申請表單相關狀態
 const showApplicationModal = ref(false)
@@ -500,6 +655,88 @@ const isMyAnimal = computed(() => {
   return animal.value.created_by === authStore.user.user_id
 })
 
+// 編輯按鈕文字
+const getEditButtonText = computed(() => {
+  if (!animal.value || !authStore.user) return '編輯'
+  
+  const from = route.query.from as string
+  
+  if (from === 'shelter-animals' && authStore.user.primary_shelter_id) {
+    return '返回管理頁面編輯'
+  } else if (animal.value.shelter_id && authStore.user.primary_shelter_id === animal.value.shelter_id) {
+    return '前往管理頁面編輯'
+  } else {
+    return '編輯'
+  }
+})
+
+// 排序後的醫療記錄（最新的在前）
+const sortedMedicalRecords = computed(() => {
+  return [...medicalRecords.value].sort((a, b) => {
+    const dateA = a.date ? new Date(a.date) : new Date(a.created_at)
+    const dateB = b.date ? new Date(b.date) : new Date(b.created_at)
+    return dateB.getTime() - dateA.getTime()
+  })
+})
+
+// 顯示的醫療記錄（根據摺疊狀態決定）
+const displayedMedicalRecords = computed(() => {
+  const records = sortedMedicalRecords.value
+  if (showAllMedicalRecords.value || records.length <= 3) {
+    return records
+  }
+  return records.slice(0, 3)
+})
+
+// 是否需要顯示摺疊按鈕
+const shouldShowCollapseButton = computed(() => {
+  return sortedMedicalRecords.value.length > 3
+})
+
+// 醫療記錄類型文字
+function getMedicalRecordTypeText(type?: string) {
+  const map: Record<string, string> = {
+    TREATMENT: '治療',
+    CHECKUP: '健康檢查',
+    VACCINE: '疫苗接種',
+    SURGERY: '手術',
+    OTHER: '其他'
+  }
+  return type ? map[type] || '其他' : '其他'
+}
+
+// 醫療記錄類型樣式
+function getMedicalRecordTypeClass(type?: string) {
+  const map: Record<string, string> = {
+    TREATMENT: 'bg-blue-100 text-blue-800',
+    CHECKUP: 'bg-green-100 text-green-800',
+    VACCINE: 'bg-yellow-100 text-yellow-800',
+    SURGERY: 'bg-red-100 text-red-800',
+    OTHER: 'bg-gray-100 text-gray-800'
+  }
+  return type ? map[type] || 'bg-gray-100 text-gray-800' : 'bg-gray-100 text-gray-800'
+}
+
+// 格式化醫療記錄日期
+function formatMedicalDate(dateString: string) {
+  const date = new Date(dateString)
+  return date.toLocaleDateString('zh-TW', { 
+    year: 'numeric', 
+    month: 'long', 
+    day: 'numeric' 
+  })
+}
+
+// 格式化地址
+function formatAddress(address: any) {
+  if (!address) return ''
+  const parts = []
+  if (address.district) parts.push(address.district)
+  if (address.street) parts.push(address.street)
+  if (address.postal_code) parts.push(`(${address.postal_code})`)
+  return parts.join(' ')
+}
+
 // 載入動物詳情
 async function loadAnimal() {
   const id = parseInt(route.params.id as string)
@@ -513,6 +750,9 @@ async function loadAnimal() {
 
   try {
     animal.value = await getAnimal(id)
+    // 載入完動物資料後，載入醫療記錄和來源詳細資訊
+    await loadMedicalRecords(id)
+    await loadSourceInfo()
   } catch (err: any) {
     console.error('Load animal error:', err)
     if (err.response?.status === 404) {
@@ -522,6 +762,45 @@ async function loadAnimal() {
     }
   } finally {
     isLoading.value = false
+  }
+}
+
+// 載入來源詳細資訊 (收容所或用戶)
+async function loadSourceInfo() {
+  if (!animal.value) return
+
+  try {
+    if (animal.value.shelter_id) {
+      // 載入收容所資訊
+      shelterInfo.value = await getShelter(animal.value.shelter_id)
+    } else if (animal.value.owner_id) {
+      // 載入用戶資訊
+      ownerInfo.value = await getUser(animal.value.owner_id)
+    }
+  } catch (err: any) {
+    console.error('Load source info error:', err)
+    // 來源資訊載入失敗不影響主要功能，只記錄錯誤
+  }
+}
+
+// 載入醫療記錄
+async function loadMedicalRecords(animalId: number) {
+  isLoadingMedical.value = true
+  medicalError.value = ''
+
+  try {
+    const response = await getMedicalRecords(animalId)
+    medicalRecords.value = response.medical_records || []
+  } catch (err: any) {
+    console.error('Load medical records error:', err)
+    
+    // 如果是 404 或其他錯誤，不顯示錯誤訊息，只是不顯示醫療記錄
+    if (err.response?.status !== 404) {
+      medicalError.value = '載入醫療記錄失敗'
+    }
+    medicalRecords.value = []
+  } finally {
+    isLoadingMedical.value = false
   }
 }
 
@@ -619,8 +898,20 @@ function goToLogin() {
 // 前往編輯
 function goToEdit() {
   if (!animal.value) return
-  // 導向到「我的送養」頁面,用戶可以在那裡編輯
-  router.push('/my-rehomes')
+  
+  // 檢查來源頁面，決定編輯方式
+  const from = route.query.from as string
+  
+  if (from === 'shelter-animals' && authStore.user?.primary_shelter_id) {
+    // 如果來自收容所動物管理頁面，返回該頁面
+    router.push('/shelter/animals')
+  } else if (animal.value.shelter_id && authStore.user?.primary_shelter_id === animal.value.shelter_id) {
+    // 如果是收容所動物且用戶是該收容所成員，導向收容所動物管理
+    router.push('/shelter/animals')
+  } else {
+    // 否則導向「我的送養」頁面
+    router.push('/my-rehomes')
+  }
 }
 
 // 初始載入

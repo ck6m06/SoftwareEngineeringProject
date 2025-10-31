@@ -15,6 +15,7 @@ class Shelter(db.Model):
     contact_email = db.Column(db.String(320), nullable=False)
     contact_phone = db.Column(db.String(32), nullable=False)
     address = db.Column(db.JSON, nullable=False)  # {street, city, county, postal_code}
+    region = db.Column(db.String(100), nullable=True)
     verified = db.Column(db.Boolean, default=False, nullable=False)
     primary_account_user_id = db.Column(db.BigInteger, db.ForeignKey('users.user_id'), nullable=True)
     created_at = db.Column(db.DateTime(6), default=datetime.utcnow, nullable=False)
@@ -38,6 +39,7 @@ class Shelter(db.Model):
             'contact_email': self.contact_email,
             'contact_phone': self.contact_phone,
             'address': self.address,
+            'region': self.region,
             'verified': self.verified,
             'primary_account_user_id': self.primary_account_user_id,
             'created_at': self.created_at.isoformat() if self.created_at else None,

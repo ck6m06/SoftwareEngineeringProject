@@ -112,10 +112,11 @@ class Animal(db.Model):
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'has_pending_application': self.has_pending_application(),
+            # 總是包含 images，確保前端有正確的圖片數組
+            'images': [img.to_dict() for img in self.images] if hasattr(self, 'images') else []
         }
         
         if include_relations:
-            data['images'] = [img.to_dict() for img in self.images]
             data['shelter'] = self.shelter.to_dict() if self.shelter else None
         
         return data

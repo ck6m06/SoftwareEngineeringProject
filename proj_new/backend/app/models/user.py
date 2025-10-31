@@ -23,6 +23,8 @@ class User(db.Model):
     phone_number = db.Column(db.String(32), nullable=True)
     first_name = db.Column(db.String(120), nullable=True)
     last_name = db.Column(db.String(120), nullable=True)
+    region = db.Column(db.String(100), nullable=True)
+    address = db.Column(db.JSON, nullable=True)
     role = db.Column(db.Enum(UserRole), default=UserRole.GENERAL_MEMBER, nullable=False)
     verified = db.Column(db.Boolean, default=False, nullable=False)
     primary_shelter_id = db.Column(db.BigInteger, db.ForeignKey('shelters.shelter_id'), nullable=True)
@@ -80,6 +82,8 @@ class User(db.Model):
             'phone_number': self.phone_number,
             'first_name': self.first_name,
             'last_name': self.last_name,
+            'region': self.region,
+            'address': self.address,
             'role': self.role.value if self.role else None,
             'verified': self.verified,
             'primary_shelter_id': self.primary_shelter_id,

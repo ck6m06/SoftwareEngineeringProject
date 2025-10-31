@@ -3,9 +3,10 @@ Animals Blueprint - 動物相關 API
 """
 from flask import request, jsonify
 from flask_smorest import Blueprint, abort
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import jwt_required, get_jwt_identity, verify_jwt_in_request
 from app import db
-from app.models import Animal, AnimalImage, User, AnimalStatus, Species, Sex
+from app.models import Animal, AnimalImage, User, AnimalStatus, Species, Sex, UserRole
+from app.models.shelter import Shelter
 from datetime import datetime
 
 animals_bp = Blueprint('animals', __name__, description='動物管理 API')
@@ -21,6 +22,10 @@ def list_animals():
         - sex: 性別 (MALE, FEMALE, UNKNOWN)
         - status: 狀態 (DRAFT, SUBMITTED, PUBLISHED, RETIRED)
         - shelter_id: 收容所 ID
+        - source_type: 來源類型 (shelter=收容所, personal=個人送養)
+        - region: 地區/縣市
+        - min_age: 最小年齡 (月數)
+        - max_age: 最大年齡 (月數)
         - page: 頁碼 (預設 1)
         - per_page: 每頁筆數 (預設 20, 最大 100)
     """
@@ -31,6 +36,10 @@ def list_animals():
     shelter_id = request.args.get('shelter_id')
     owner_id = request.args.get('owner_id', type=int)
     created_by = request.args.get('created_by', type=int)
+    source_type = request.args.get('source_type')  # 'shelter' 或 'personal'
+    region = request.args.get('region')  # 地區/縣市
+    min_age = request.args.get('min_age', type=int)  # 最小年齡(月數)
+    max_age = request.args.get('max_age', type=int)  # 最大年齡(月數)
     q = request.args.get('q', '').strip()
     page = request.args.get('page', 1, type=int)
     per_page = min(request.args.get('per_page', 20, type=int), 100)
@@ -41,7 +50,36 @@ def list_animals():
     # 如果有 owner_id 或 created_by 參數，查詢該用戶的所有動物(包含草稿)
     # 否則預設只顯示已發布的動物
     if owner_id:
-        query = query.filter_by(owner_id=owner_id)
+        # 特殊處理：如果查詢者是收容所成員，同時查詢個人動物和收容所動物
+        try:
+            # 檢查是否有 JWT token
+            verify_jwt_in_request(optional=True)
+            current_user_id = int(get_jwt_identity()) if get_jwt_identity() else None
+            
+            if current_user_id == owner_id:  # 查詢自己的動物
+                current_user = User.query.get(current_user_id)
+                
+                if current_user and current_user.role == UserRole.SHELTER_MEMBER and current_user.primary_shelter_id:
+                    # 收容所成員：查詢個人動物 + 收容所動物
+                    query = query.filter(
+                        db.or_(
+                            Animal.owner_id == owner_id,
+                            Animal.shelter_id == current_user.primary_shelter_id
+                        )
+                    )
+                else:
+                    # 一般用戶：只查詢個人動物 (包含草稿)
+                    query = query.filter_by(owner_id=owner_id)
+            elif current_user_id is None:
+                # 沒有認證但查詢特定用戶的動物：允許查詢該用戶的所有動物
+                # 這是為了處理前端認證狀態異常的情況
+                query = query.filter_by(owner_id=owner_id)
+            else:
+                # 查詢其他用戶的動物，只能看已發布的
+                query = query.filter_by(owner_id=owner_id, status=AnimalStatus.PUBLISHED)
+        except Exception as e:
+            # 發生錯誤時的備用方案：如果是查詢特定用戶的動物，允許查看所有狀態
+            query = query.filter_by(owner_id=owner_id)
     elif created_by:
         query = query.filter_by(created_by=created_by)
     else:
@@ -71,6 +109,57 @@ def list_animals():
     
     if shelter_id:
         query = query.filter_by(shelter_id=shelter_id)
+    
+    # 來源類型篩選
+    if source_type:
+        if source_type == 'shelter':
+            # 只顯示收容所動物
+            query = query.filter(Animal.shelter_id.isnot(None))
+        elif source_type == 'personal':
+            # 只顯示個人送養動物
+            query = query.filter(Animal.owner_id.isnot(None))
+    
+    # 地區篩選 - 需要 JOIN 用戶和收容所資料來取得地區資訊
+    if region:
+        from app.models.user import User
+        from app.models.shelter import Shelter
+        
+        # 建立子查詢條件
+        shelter_region_condition = db.exists().where(
+            db.and_(
+                Animal.shelter_id == Shelter.shelter_id,
+                Shelter.region.like(f'%{region}%')
+            )
+        )
+        
+        owner_region_condition = db.exists().where(
+            db.and_(
+                Animal.owner_id == User.user_id,
+                User.region.like(f'%{region}%')
+            )
+        )
+        
+        query = query.filter(
+            db.or_(shelter_region_condition, owner_region_condition)
+        )
+    
+    # 年齡篩選 - 計算動物年齡(月數)
+    if min_age is not None or max_age is not None:
+        from sqlalchemy import func, extract
+        
+        # 計算年齡：當前日期 - 出生日期，轉換為月數
+        # TIMESTAMPDIFF(MONTH, dob, CURDATE()) 計算月數差
+        age_in_months = func.timestampdiff(
+            db.text('MONTH'),
+            Animal.dob,
+            func.curdate()
+        )
+        
+        if min_age is not None:
+            query = query.filter(age_in_months >= min_age)
+        
+        if max_age is not None:
+            query = query.filter(age_in_months <= max_age)
     
     # 關鍵字搜尋
     if q:
@@ -133,6 +222,23 @@ def create_animal():
     data = request.get_json()
     
     # 建立動物
+    # 決定是收容所動物還是個人送養動物
+    shelter_id = None
+    owner_id = None
+    
+    if user.role == UserRole.SHELTER_MEMBER and user.primary_shelter_id:
+        # 收容所會員且有關聯的收容所 -> 設為收容所動物
+        shelter_id = user.primary_shelter_id
+        owner_id = None
+    elif user.role == UserRole.ADMIN and data.get('shelter_id'):
+        # 管理員可以指定收容所
+        shelter_id = data.get('shelter_id')
+        owner_id = None
+    else:
+        # 一般會員或其他情況 -> 個人送養
+        shelter_id = None
+        owner_id = current_user_id
+    
     animal = Animal(
         name=data.get('name'),
         species=Species(data['species']) if data.get('species') else None,
@@ -142,8 +248,8 @@ def create_animal():
         dob=datetime.fromisoformat(data['dob']) if data.get('dob') else None,
         description=data.get('description'),
         status=AnimalStatus.DRAFT,  # 預設為草稿
-        shelter_id=data.get('shelter_id'),
-        owner_id=current_user_id,
+        shelter_id=shelter_id,
+        owner_id=owner_id,
         medical_summary=data.get('medical_summary'),
         created_by=current_user_id
     )
@@ -176,10 +282,23 @@ def update_animal(animal_id):
     # 權限檢查 (問題6)
     from app.models.user import UserRole
     
-    # 只有擁有者可以編輯自己的動物
-    # 管理員不能編輯用戶傳來的送養資料
-    if animal.owner_id != current_user_id:
-        abort(403, message='只有動物擁有者可以修改此動物資料')
+    # 檢查權限
+    has_permission = False
+    
+    # 1. 如果是個人送養動物 (owner_id 有值)
+    if animal.owner_id and animal.owner_id == current_user_id:
+        has_permission = True
+    
+    # 2. 如果是收容所動物 (shelter_id 有值) 且當前用戶是該收容所成員
+    elif animal.shelter_id and user.role == UserRole.SHELTER_MEMBER and user.primary_shelter_id == animal.shelter_id:
+        has_permission = True
+    
+    # 3. 如果是管理員且是收容所動物
+    elif animal.shelter_id and user.role == UserRole.ADMIN:
+        has_permission = True
+    
+    if not has_permission:
+        abort(403, message='只有動物擁有者或收容所成員可以修改此動物資料')
     
     data = request.get_json()
     
@@ -227,7 +346,24 @@ def delete_animal(animal_id):
         abort(404, message='動物不存在')
     
     # 檢查權限
-    if animal.owner_id != current_user_id and not user.is_admin:
+    from app.models.user import UserRole
+    
+    # 檢查權限
+    has_permission = False
+    
+    # 1. 如果是個人送養動物 (owner_id 有值)
+    if animal.owner_id and animal.owner_id == current_user_id:
+        has_permission = True
+    
+    # 2. 如果是收容所動物 (shelter_id 有值) 且當前用戶是該收容所成員
+    elif animal.shelter_id and user.role == UserRole.SHELTER_MEMBER and user.primary_shelter_id == animal.shelter_id:
+        has_permission = True
+    
+    # 3. 如果是管理員
+    elif user.role == UserRole.ADMIN:
+        has_permission = True
+    
+    if not has_permission:
         abort(403, message='沒有權限刪除此動物資料')
     
     # 軟刪除
@@ -249,6 +385,12 @@ def add_animal_image(animal_id):
     ---
     """
     try:
+        import base64
+        import io
+        import time
+        from config import Config
+        from app.utils.minio_helper import get_minio_client
+        
         current_user_id = int(get_jwt_identity())
         current_user = User.query.get(current_user_id)
         
@@ -258,7 +400,23 @@ def add_animal_image(animal_id):
         
         # 權限檢查
         from app.models.user import UserRole
-        if animal.owner_id != current_user_id and current_user.role != UserRole.ADMIN:
+        
+        # 檢查權限
+        has_permission = False
+        
+        # 1. 如果是個人送養動物 (owner_id 有值)
+        if animal.owner_id and animal.owner_id == current_user_id:
+            has_permission = True
+        
+        # 2. 如果是收容所動物 (shelter_id 有值) 且當前用戶是該收容所成員
+        elif animal.shelter_id and current_user.role == UserRole.SHELTER_MEMBER and current_user.primary_shelter_id == animal.shelter_id:
+            has_permission = True
+        
+        # 3. 如果是管理員
+        elif current_user.role == UserRole.ADMIN:
+            has_permission = True
+        
+        if not has_permission:
             abort(403, message='無權限管理此動物的圖片')
         
         data = request.get_json()
@@ -266,6 +424,49 @@ def add_animal_image(animal_id):
         # 驗證必填欄位
         if not data.get('image_url'):
             abort(400, message='缺少必填欄位: image_url')
+        
+        # 處理 base64 圖片上傳
+        image_url = data['image_url']
+        storage_key = data.get('storage_key', f'animals/{animal_id}/{int(time.time())}.jpg')
+        
+        # 如果是 base64 格式，上傳到 MinIO
+        if image_url.startswith('data:image/'):
+            try:
+                # 解析 base64 數據
+                header, base64_data = image_url.split(',', 1)
+                image_data = base64.b64decode(base64_data)
+                
+                # 上傳到 MinIO
+                minio_client = get_minio_client()
+                
+                # 確保 bucket 存在
+                bucket_name = Config.MINIO_BUCKET
+                if not minio_client.bucket_exists(bucket_name):
+                    minio_client.make_bucket(bucket_name)
+                
+                # 上傳文件
+                image_stream = io.BytesIO(image_data)
+                minio_client.put_object(
+                    bucket_name,
+                    storage_key,
+                    image_stream,
+                    len(image_data),
+                    content_type=data.get('mime_type', 'image/jpeg')
+                )
+                
+                # 構建公開 URL
+                final_url = f"http://{Config.MINIO_EXTERNAL_ENDPOINT or 'localhost:9000'}/{bucket_name}/{storage_key}"
+                
+                print(f"✅ 圖片已上傳到 MinIO: {storage_key}")
+                
+            except Exception as upload_error:
+                print(f"❌ MinIO 上傳失敗: {str(upload_error)}")
+                # 如果上傳失敗，使用原始 base64 作為備用
+                final_url = image_url
+                
+        else:
+            # 如果不是 base64，直接使用提供的 URL
+            final_url = image_url
         
         # 計算新圖片的順序
         max_order = db.session.query(db.func.max(AnimalImage.order)).filter_by(
@@ -275,8 +476,8 @@ def add_animal_image(animal_id):
         # 建立圖片記錄
         image = AnimalImage(
             animal_id=animal_id,
-            storage_key=data.get('storage_key', ''),
-            url=data['image_url'],
+            storage_key=storage_key,
+            url=final_url,
             mime_type=data.get('mime_type', 'image/jpeg'),
             order=max_order + 1
         )
@@ -291,6 +492,7 @@ def add_animal_image(animal_id):
         
     except Exception as e:
         db.session.rollback()
+        print(f"❌ 新增圖片錯誤: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 
@@ -311,7 +513,23 @@ def delete_animal_image(animal_id, image_id):
         
         # 權限檢查
         from app.models.user import UserRole
-        if animal.owner_id != current_user_id and current_user.role != UserRole.ADMIN:
+        
+        # 檢查權限
+        has_permission = False
+        
+        # 1. 如果是個人送養動物 (owner_id 有值)
+        if animal.owner_id and animal.owner_id == current_user_id:
+            has_permission = True
+        
+        # 2. 如果是收容所動物 (shelter_id 有值) 且當前用戶是該收容所成員
+        elif animal.shelter_id and current_user.role == UserRole.SHELTER_MEMBER and current_user.primary_shelter_id == animal.shelter_id:
+            has_permission = True
+        
+        # 3. 如果是管理員
+        elif current_user.role == UserRole.ADMIN:
+            has_permission = True
+        
+        if not has_permission:
             abort(403, message='無權限管理此動物的圖片')
         
         image = AnimalImage.query.filter_by(
@@ -357,7 +575,23 @@ def reorder_animal_images(animal_id):
         
         # 權限檢查
         from app.models.user import UserRole
-        if animal.owner_id != current_user_id and current_user.role != UserRole.ADMIN:
+        
+        # 檢查權限
+        has_permission = False
+        
+        # 1. 如果是個人送養動物 (owner_id 有值)
+        if animal.owner_id and animal.owner_id == current_user_id:
+            has_permission = True
+        
+        # 2. 如果是收容所動物 (shelter_id 有值) 且當前用戶是該收容所成員
+        elif animal.shelter_id and current_user.role == UserRole.SHELTER_MEMBER and current_user.primary_shelter_id == animal.shelter_id:
+            has_permission = True
+        
+        # 3. 如果是管理員
+        elif current_user.role == UserRole.ADMIN:
+            has_permission = True
+        
+        if not has_permission:
             abort(403, message='無權限管理此動物的圖片')
         
         data = request.get_json()
@@ -398,9 +632,23 @@ def submit_animal(animal_id):
         if not animal:
             abort(404, message='動物不存在')
         
-        # 權限檢查: 必須是擁有者
-        if animal.owner_id != current_user_id:
-            abort(403, message='只能提交自己的動物')
+        # 權限檢查
+        user = User.query.get(current_user_id)
+        from app.models.user import UserRole
+        
+        # 檢查權限
+        has_permission = False
+        
+        # 1. 如果是個人送養動物 (owner_id 有值)
+        if animal.owner_id and animal.owner_id == current_user_id:
+            has_permission = True
+        
+        # 2. 如果是收容所動物 (shelter_id 有值) 且當前用戶是該收容所成員
+        elif animal.shelter_id and user.role == UserRole.SHELTER_MEMBER and user.primary_shelter_id == animal.shelter_id:
+            has_permission = True
+        
+        if not has_permission:
+            abort(403, message='只能提交自己的動物或所屬收容所的動物')
         
         # 狀態檢查
         if animal.status != AnimalStatus.DRAFT:
@@ -475,7 +723,23 @@ def retire_animal(animal_id):
         
         # 權限檢查
         from app.models.user import UserRole
-        if animal.owner_id != current_user_id and current_user.role != UserRole.ADMIN:
+        
+        # 檢查權限
+        has_permission = False
+        
+        # 1. 如果是個人送養動物 (owner_id 有值)
+        if animal.owner_id and animal.owner_id == current_user_id:
+            has_permission = True
+        
+        # 2. 如果是收容所動物 (shelter_id 有值) 且當前用戶是該收容所成員
+        elif animal.shelter_id and current_user.role == UserRole.SHELTER_MEMBER and current_user.primary_shelter_id == animal.shelter_id:
+            has_permission = True
+        
+        # 3. 如果是管理員
+        elif current_user.role == UserRole.ADMIN:
+            has_permission = True
+        
+        if not has_permission:
             abort(403, message='無權限下架此動物')
         
         if animal.status == AnimalStatus.RETIRED:

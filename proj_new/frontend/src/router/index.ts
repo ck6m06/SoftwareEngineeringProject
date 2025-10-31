@@ -15,7 +15,8 @@ const NotificationCenter = () => import('@/pages/NotificationCenter.vue')
 const MyApplications = () => import('@/pages/MyApplications.vue')
 const MyRehomes = () => import('@/pages/MyRehomes.vue')
 const RehomeForm = () => import('@/pages/RehomeForm.vue')
-const ShelterDashboard = () => import('@/pages/ShelterDashboard.vue')
+const ShelterBatch = () => import('@/pages/ShelterBatch.vue')
+const ShelterAnimals = () => import('@/pages/ShelterAnimals.vue')
 const AdminDashboard = () => import('@/pages/AdminDashboard.vue')
 const ApplicationReview = () => import('@/pages/ApplicationReview.vue')
 const MedicalRecords = () => import('@/pages/MedicalRecords.vue')
@@ -101,9 +102,15 @@ const routes: RouteRecordRaw[] = [
   },
   {
     path: '/shelter/dashboard',
-    name: 'ShelterDashboard',
-    component: ShelterDashboard,
-    meta: { title: '收容所管理', requiresAuth: true, requiresRole: 'SHELTER_MEMBER' }
+    name: 'ShelterBatch',
+    component: ShelterBatch,
+    meta: { title: '批次送養', requiresAuth: true, requiresRole: 'SHELTER_MEMBER' }
+  },
+  {
+    path: '/shelter/animals',
+    name: 'ShelterAnimals',
+    component: ShelterAnimals,
+    meta: { title: '收容所動物管理', requiresAuth: true, requiresRole: 'SHELTER_MEMBER' }
   },
   {
     path: '/admin/dashboard',
@@ -112,10 +119,16 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '管理後台', requiresAuth: true, requiresRole: 'ADMIN' }
   },
   {
-    path: '/admin/applications',
+    path: '/shelter/applications',
+    name: 'ShelterApplications',
+    component: ApplicationReview,
+    meta: { title: '申請審核', requiresAuth: true, requiresRole: 'SHELTER_MEMBER' }
+  },
+  {
+    path: '/applications',
     name: 'ApplicationReview',
     component: ApplicationReview,
-    meta: { title: '申請審核', requiresAuth: true, requiresRole: ['ADMIN', 'SHELTER_MEMBER', 'GENERAL_MEMBER'] }
+    meta: { title: '審核管理', requiresAuth: true, requiresRole: ['GENERAL_MEMBER', 'SHELTER_MEMBER'] }
   },
   {
     path: '/medical-records',

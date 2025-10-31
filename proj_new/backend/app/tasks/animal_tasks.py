@@ -121,12 +121,25 @@ def process_animal_batch_import(self, job_id: int) -> Dict[str, Any]:
                 if sex not in ['MALE', 'FEMALE', 'UNKNOWN']:
                     raise ValueError(f'Invalid sex: {sex}. Must be MALE, FEMALE, or UNKNOWN')
                 
-                # 處理出生日期
+                # 處理出生日期 - 支援多種格式
                 try:
                     from datetime import datetime as dt
-                    dob = dt.strptime(row['dob'].strip(), '%Y-%m-%d').date()
-                except ValueError:
-                    raise ValueError(f'Invalid date format for dob: {row["dob"]}. Use YYYY-MM-DD')
+                    dob_str = row['dob'].strip()
+                    # 嘗試多種日期格式
+                    date_formats = ['%Y-%m-%d', '%Y/%m/%d', '%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y']
+                    dob = None
+                    for fmt in date_formats:
+                        try:
+                            dob = dt.strptime(dob_str, fmt).date()
+                            break
+                        except ValueError:
+                            continue
+                    
+                    if dob is None:
+                        raise ValueError(f'Invalid date format for dob: {row["dob"]}. Supported formats: YYYY-MM-DD, YYYY/MM/DD, DD/MM/YYYY, DD-MM-YYYY')
+                except Exception as e:
+                    if 'Invalid date format' not in str(e):
+                        raise ValueError(f'Error parsing date {row["dob"]}: {str(e)}')
                 
                 # 建立動物物件
                 animal = Animal(
@@ -193,12 +206,26 @@ def process_animal_batch_import(self, job_id: int) -> Dict[str, Any]:
                     if record_type not in ['TREATMENT', 'CHECKUP', 'VACCINE', 'SURGERY', 'OTHER']:
                         raise ValueError(f'Invalid record_type: {record_type}')
                     
-                    # 處理醫療日期
+                    # 處理醫療日期 - 支援多種格式
                     try:
                         from datetime import datetime as dt
-                        medical_date = dt.strptime(row['date'].strip(), '%Y-%m-%d').date()
-                    except ValueError:
-                        raise ValueError(f'Invalid date format: {row["date"]}. Use YYYY-MM-DD')
+                        medical_date_str = row['date'].strip()
+                        # 嘗試多種日期格式 (與動物出生日期格式一致)
+                        date_formats = ['%Y-%m-%d', '%Y/%m/%d', '%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y']
+                        medical_date = None
+                        for fmt in date_formats:
+                            try:
+                                medical_date = dt.strptime(medical_date_str, fmt).date()
+                                break
+                            except ValueError:
+                                continue
+                        
+                        if medical_date is None:
+                            raise ValueError(f'Invalid date format for medical record: {row["date"]}. Supported formats: YYYY-MM-DD, YYYY/MM/DD, DD/MM/YYYY, DD-MM-YYYY')
+                    except Exception as e:
+                        if 'Invalid date format' not in str(e):
+                            raise ValueError(f'Error parsing medical date {row["date"]}: {str(e)}')
+                        raise
                     
                     # 創建醫療記錄
                     medical_record = MedicalRecord(

@@ -4,6 +4,7 @@
  */
 import api from './client'
 import type { Shelter } from '@/types/models'
+import type { Animal } from './animals'
 
 export interface ShelterFilters {
   verified?: boolean
@@ -19,6 +20,36 @@ export interface SheltersResponse {
   page: number
   per_page: number
   total_pages: number
+}
+
+export interface ShelterAnimalsFilters {
+  status?: 'DRAFT' | 'SUBMITTED' | 'PUBLISHED' | 'RETIRED'
+  species?: 'CAT' | 'DOG'
+  page?: number
+  per_page?: number
+}
+
+export interface ShelterAnimalsResponse {
+  animals: Animal[]
+  page: number
+  per_page: number
+  total: number
+  pages: number
+  has_prev: boolean
+  has_next: boolean
+}
+
+export interface BatchStatusUpdateRequest {
+  animal_ids: number[]
+  action: 'draft' | 'submit' | 'publish' | 'retire'
+}
+
+export interface BatchStatusUpdateResponse {
+  message: string
+  success_count: number
+  failed_count: number
+  total_count: number
+  errors: string[]
 }
 
 /**
@@ -75,4 +106,36 @@ export async function batchImportAnimals(shelterId: number, file: File): Promise
   })
   
   return response.data
+}
+
+/**
+ * 取得收容所的動物列表 (含草稿狀態)
+ */
+export async function getShelterAnimals(shelterId: number, filters?: ShelterAnimalsFilters): Promise<ShelterAnimalsResponse> {
+  const response = await api.get(`/shelters/${shelterId}/animals`, { params: filters })
+  return response.data
+}
+
+/**
+ * 批次更新動物狀態
+ */
+export async function batchUpdateAnimalStatus(shelterId: number, data: BatchStatusUpdateRequest): Promise<BatchStatusUpdateResponse> {
+  const response = await api.patch(`/shelters/${shelterId}/animals/batch/status`, data)
+  return response.data
+}
+
+/**
+ * 獲取動物的醫療記錄
+ */
+export async function getAnimalMedicalRecords(animalId: number): Promise<Array<{
+  medical_record_id: number
+  record_type: string
+  date: string
+  provider: string
+  details: string
+  verified: boolean
+  created_at: string
+}>> {
+  const response = await api.get(`/medical-records/animals/${animalId}/medical-records`)
+  return response.data.medical_records || []
 }

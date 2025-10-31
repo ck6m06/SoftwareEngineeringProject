@@ -10,6 +10,7 @@ from app import db
 from app.models.shelter import Shelter
 from app.models.user import User, UserRole
 from app.models.others import Job, JobType, JobStatus
+from app.models.animal import Animal, AnimalStatus, Species, AnimalImage
 from app.services.audit_service import audit_service
 import re
 
@@ -135,6 +136,7 @@ def create_shelter():
         contact_email=data['contact_email'],
         contact_phone=data['contact_phone'],
         address=data['address'],
+        region=data.get('region'),  # 可選的地區欄位
         verified=False,  # 預設未驗證
         primary_account_user_id=current_user_id
     )
@@ -179,7 +181,7 @@ def update_shelter(shelter_id):
     data = request.get_json()
     
     # 可更新的欄位
-    allowed_fields = ['name', 'slug', 'contact_email', 'contact_phone', 'address']
+    allowed_fields = ['name', 'slug', 'contact_email', 'contact_phone', 'address', 'region']
     
     for field in allowed_fields:
         if field in data:
@@ -433,3 +435,211 @@ def batch_upload_animals(shelter_id):
     except Exception as e:
         db.session.rollback()
         abort(500, message=f'創建批次匯入任務失敗: {str(e)}')
+
+
+@shelters_bp.route('/<int:shelter_id>/animals/batch/status', methods=['PATCH'])
+@jwt_required()
+def batch_update_animal_status(shelter_id):
+    """
+    批次更新動物狀態
+    ---
+    Request Body:
+        animal_ids: List[int] - 動物 ID 列表
+        action: str - 操作類型 ('draft', 'submit', 'publish', 'retire')
+    """
+    current_user_id = int(get_jwt_identity())
+    
+    shelter = Shelter.query.filter_by(shelter_id=shelter_id, deleted_at=None).first()
+    if not shelter:
+        abort(404, message='收容所不存在')
+    
+    # 檢查權限
+    if not check_shelter_member_or_admin(current_user_id, shelter_id):
+        abort(403, message='無權限執行批次操作')
+    
+    # 解析請求
+    data = request.get_json()
+    if not data:
+        abort(400, message='缺少請求資料')
+    
+    animal_ids = data.get('animal_ids', [])
+    action = data.get('action', '').lower()
+    
+    if not animal_ids:
+        abort(400, message='請選擇要處理的動物')
+    
+    if action not in ['draft', 'submit', 'publish', 'retire']:
+        abort(400, message='無效的操作類型。支援: draft, submit, publish, retire')
+    
+    # 檢查動物是否屬於該收容所
+    animals = Animal.query.filter(
+        Animal.animal_id.in_(animal_ids),
+        Animal.shelter_id == shelter_id,
+        Animal.deleted_at == None
+    ).all()
+    
+    if len(animals) != len(animal_ids):
+        found_ids = [a.animal_id for a in animals]
+        missing_ids = [aid for aid in animal_ids if aid not in found_ids]
+        abort(400, message=f'以下動物不存在或不屬於該收容所: {missing_ids}')
+    
+    # 執行批次狀態更新
+    success_count = 0
+    failed_count = 0
+    errors = []
+    
+    for animal in animals:
+        try:
+            # 根據 action 更新狀態
+            if action == 'draft':
+                if animal.status in [AnimalStatus.SUBMITTED, AnimalStatus.PUBLISHED, AnimalStatus.RETIRED]:
+                    animal.status = AnimalStatus.DRAFT
+                    animal.updated_at = datetime.utcnow()
+                    success_count += 1
+                else:
+                    errors.append(f'動物 {animal.animal_id} ({animal.name}) 目前狀態無法變更為草稿')
+                    failed_count += 1
+                    
+            elif action == 'submit':
+                if animal.status == AnimalStatus.DRAFT:
+                    animal.status = AnimalStatus.SUBMITTED
+                    animal.updated_at = datetime.utcnow()
+                    success_count += 1
+                else:
+                    errors.append(f'動物 {animal.animal_id} ({animal.name}) 必須是草稿狀態才能提交')
+                    failed_count += 1
+                    
+            elif action == 'publish':
+                if animal.status in [AnimalStatus.SUBMITTED, AnimalStatus.DRAFT]:
+                    animal.status = AnimalStatus.PUBLISHED
+                    animal.updated_at = datetime.utcnow()
+                    success_count += 1
+                else:
+                    errors.append(f'動物 {animal.animal_id} ({animal.name}) 目前狀態無法發布')
+                    failed_count += 1
+                    
+            elif action == 'retire':
+                if animal.status == AnimalStatus.PUBLISHED:
+                    animal.status = AnimalStatus.RETIRED
+                    animal.updated_at = datetime.utcnow()
+                    success_count += 1
+                else:
+                    errors.append(f'動物 {animal.animal_id} ({animal.name}) 必須是已發布狀態才能下架')
+                    failed_count += 1
+                    
+        except Exception as e:
+            errors.append(f'動物 {animal.animal_id} ({animal.name}) 處理失敗: {str(e)}')
+            failed_count += 1
+    
+    # 提交變更
+    try:
+        db.session.commit()
+        
+        # 創建通知
+        from app.services.notification_service import NotificationService
+        
+        # 計算狀態中文名稱
+        action_names = {
+            'draft': '草稿',
+            'submit': '提交審核',
+            'publish': '發布',
+            'retire': '下架'
+        }
+        action_name = action_names.get(action, action)
+        
+        NotificationService.create(
+            recipient_id=current_user_id,
+            type='system_notification',
+            payload={
+                'title': f'批次{action_name}完成',
+                'message': f'成功處理 {success_count} 隻動物，失敗 {failed_count} 隻動物',
+                'priority': 'NORMAL'
+            }
+        )
+        
+        return jsonify({
+            'message': f'批次{action_name}完成',
+            'success_count': success_count,
+            'failed_count': failed_count,
+            'total_count': len(animal_ids),
+            'errors': errors[:10]  # 只返回前10個錯誤
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        abort(500, message=f'批次更新失敗: {str(e)}')
+
+
+@shelters_bp.route('/<int:shelter_id>/animals', methods=['GET'])
+@jwt_required()
+def get_shelter_animals(shelter_id):
+    """
+    取得收容所的動物列表 (含草稿狀態，供管理用)
+    ---
+    Query Parameters:
+        - status: 狀態篩選 (DRAFT, SUBMITTED, PUBLISHED, RETIRED)
+        - species: 物種篩選 (CAT, DOG)
+        - page: 頁碼 (預設 1)
+        - per_page: 每頁筆數 (預設 20)
+    """
+    current_user_id = int(get_jwt_identity())
+    
+    shelter = Shelter.query.filter_by(shelter_id=shelter_id, deleted_at=None).first()
+    if not shelter:
+        abort(404, message='收容所不存在')
+    
+    # 檢查權限
+    if not check_shelter_member_or_admin(current_user_id, shelter_id):
+        abort(403, message='無權限查看收容所動物')
+    
+    # 取得查詢參數
+    status = request.args.get('status')
+    species = request.args.get('species')
+    page = request.args.get('page', 1, type=int)
+    per_page = min(request.args.get('per_page', 20, type=int), 100)
+    
+    # 建立查詢
+    query = Animal.query.filter(
+        Animal.shelter_id == shelter_id,
+        Animal.deleted_at == None
+    )
+    
+    # 套用篩選
+    if status:
+        try:
+            status_enum = AnimalStatus[status.upper()]
+            query = query.filter_by(status=status_enum)
+        except KeyError:
+            abort(400, message=f'無效的狀態: {status}')
+    
+    if species:
+        try:
+            species_enum = Species[species.upper()]
+            query = query.filter_by(species=species_enum)
+        except KeyError:
+            abort(400, message=f'無效的物種: {species}')
+    
+    # 分頁
+    pagination = query.order_by(Animal.created_at.desc()).paginate(
+        page=page,
+        per_page=per_page,
+        error_out=False
+    )
+    
+    animals = pagination.items
+    
+    # 載入圖片
+    for animal in animals:
+        animal.images = AnimalImage.query.filter_by(
+            animal_id=animal.animal_id
+        ).order_by(AnimalImage.order).all()
+    
+    return jsonify({
+        'animals': [animal.to_dict(include_relations=True) for animal in animals],
+        'page': pagination.page,
+        'per_page': pagination.per_page,
+        'total': pagination.total,
+        'pages': pagination.pages,
+        'has_prev': pagination.has_prev,
+        'has_next': pagination.has_next
+    }), 200

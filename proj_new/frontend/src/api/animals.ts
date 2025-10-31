@@ -7,9 +7,13 @@ export interface AnimalFilters {
   species?: 'CAT' | 'DOG'
   breed?: string
   sex?: 'MALE' | 'FEMALE' | 'UNKNOWN'
-  status?: 'DRAFT' | 'SUBMITTED' | 'PUBLISHED' | 'RETIRED'
+  status?: 'DRAFT' | 'SUBMITTED' | 'PUBLISHED' | 'ADOPTED' | 'RETIRED'
   shelter_id?: number
   owner_id?: number
+  source_type?: 'shelter' | 'personal'  // 來源類型
+  region?: string  // 地區/縣市
+  min_age?: number  // 最小年齡(月數)
+  max_age?: number  // 最大年齡(月數)
   featured?: boolean
   q?: string  // 搜尋關鍵字
   page?: number

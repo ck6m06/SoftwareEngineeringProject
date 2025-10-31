@@ -1,5 +1,5 @@
 <template>
-  <div class="shelter-dashboard">
+  <div class="shelter-batch">
     <div class="container mx-auto px-4 py-8 max-w-7xl">
       <h1 class="text-3xl font-bold text-gray-900 mb-8">批次送養</h1>
       
@@ -71,14 +71,14 @@
                   <li><strong>animal_code:</strong> 動物編號 (自行編碼,用於關聯照片和醫療記錄,例: 001, 002, A001)</li>
                   <li><strong>species:</strong> CAT 或 DOG</li>
                   <li><strong>sex:</strong> MALE 或 FEMALE</li>
-                  <li><strong>dob:</strong> 出生日期 YYYY-MM-DD (例: 2023-01-15)</li>
+                  <li><strong>dob:</strong> 出生日期，支援多種格式：YYYY-MM-DD、YYYY/MM/DD、DD/MM/YYYY、DD-MM-YYYY</li>
                 </ul>
                 <p><strong>醫療記錄 CSV 欄位說明:</strong></p>
                 <ul class="list-disc list-inside ml-2">
                   <li><strong>必填:</strong> animal_code, record_type, date</li>
                   <li><strong>animal_code:</strong> 對應動物基本資訊的編號</li>
                   <li><strong>record_type:</strong> TREATMENT, CHECKUP, VACCINE, SURGERY, OTHER</li>
-                  <li><strong>date:</strong> 醫療日期 YYYY-MM-DD</li>
+                  <li><strong>date:</strong> 醫療日期，支援多種格式：YYYY-MM-DD、YYYY/MM/DD、DD/MM/YYYY、DD-MM-YYYY</li>
                   <li><strong>選填:</strong> provider, details</li>
                 </ul>
               </div>
@@ -540,9 +540,9 @@ function downloadAnimalTemplate() {
 function downloadMedicalTemplate() {
   const csvContent = `animal_code,record_type,date,provider,details
 001,VACCINE,2024-09-15,City Animal Hospital,Rabies vaccination completed
-001,SURGERY,2024-03-10,Love & Care Veterinary,Neutering surgery recovery excellent
-002,CHECKUP,2024-10-01,Pet Health Center,Annual health check normal no abnormalities
-003,VACCINE,2024-08-20,Animal Shelter Clinic,Three-in-one vaccine administered
+001,SURGERY,2024/03/10,Love & Care Veterinary,Neutering surgery recovery excellent
+002,CHECKUP,01/10/2024,Pet Health Center,Annual health check normal no abnormalities
+003,VACCINE,20-08-2024,Animal Shelter Clinic,Three-in-one vaccine administered
 003,TREATMENT,2024-07-15,Animal Hospital,Skin treatment fully recovered`
   
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })

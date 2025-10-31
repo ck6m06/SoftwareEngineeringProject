@@ -4,6 +4,29 @@
       {{ isEditMode ? '編輯送養資訊' : '刊登送養資訊' }}
     </h1>
 
+    <!-- 收容所會員提示 -->
+    <div v-if="authStore.user?.role === 'SHELTER_MEMBER'" class="bg-amber-50 border border-amber-200 rounded-lg p-6 mb-8">
+      <div class="flex items-start gap-3">
+        <div class="text-2xl">⚠️</div>
+        <div>
+          <h2 class="text-lg font-semibold text-amber-900 mb-2">收容所會員注意事項</h2>
+          <p class="text-amber-800 mb-3">您正在進行<strong>單次送養</strong>操作。根據系統設計：</p>
+          <ul class="list-disc list-inside text-amber-800 space-y-1 mb-3">
+            <li>此動物仍然歸屬於收容所機構</li>
+            <li>可在「收容所動物管理」中進行批次操作</li>
+            <li>如需批次匯入，請使用收容所管理功能</li>
+          </ul>
+          <button
+            type="button"
+            @click="router.push('/shelter/animals')"
+            class="inline-flex items-center px-4 py-2 bg-amber-600 text-white rounded-md hover:bg-amber-700 transition text-sm"
+          >
+            🐾 前往收容所動物管理
+          </button>
+        </div>
+      </div>
+    </div>
+
     <form @submit.prevent="handleSubmit" class="space-y-8">
       <!-- 步驟指示器 -->
       <div class="steps flex items-center justify-between mb-8">
@@ -580,10 +603,14 @@ onMounted(async () => {
 
   // 檢查是否為編輯模式 (computed 會自動從 route.query.id 判斷)
   const animalId = route.query.id
+  console.log('RehomeForm onMounted - animalId from route:', animalId)
+  console.log('RehomeForm onMounted - current user:', authStore.user?.user_id, authStore.user?.role)
+  
   if (animalId) {
     await loadAnimalData(Number(animalId))
   } else {
     // 新增模式：嘗試從 localStorage 載入草稿
+    console.log('RehomeForm onMounted - loading draft from localStorage')
     loadDraft()
   }
 })
@@ -592,8 +619,13 @@ async function loadAnimalData(id: number) {
   try {
     const animal = await getAnimal(id)
     
-    // 檢查是否為當前用戶的動物
-    if (animal.owner_id !== authStore.user?.user_id) {
+    // 檢查權限：個人動物或收容所動物
+    const isOwner = animal.owner_id === authStore.user?.user_id
+    const isShelterAnimal = animal.shelter_id && 
+                           authStore.user?.role === 'SHELTER_MEMBER' && 
+                           authStore.user?.primary_shelter_id === animal.shelter_id
+    
+    if (!isOwner && !isShelterAnimal) {
       alert('無權限編輯此動物資料')
       router.push('/my-rehomes')
       return
@@ -823,22 +855,44 @@ async function saveDraft() {
 
 function loadDraft() {
   const draftStr = localStorage.getItem('rehome_draft')
+  console.log('loadDraft - raw draft string:', draftStr)
   if (!draftStr) return
 
   try {
     const draft = JSON.parse(draftStr)
+    console.log('loadDraft - parsed draft:', draft)
     
-    // 如果草稿有 animalId,驗證該動物是否仍然存在
+    // 如果草稿有 animalId,驗證該動物是否仍然存在且屬於當前用戶
     if (draft.animalId) {
-      // 嘗試載入該動物資料來驗證
+      console.log('loadDraft - checking animal permissions for ID:', draft.animalId)
+      // 嘗試載入該動物資料來驗證權限
       getAnimal(draft.animalId)
-        .then(() => {
-          // 導航到編輯模式
-          router.replace({ path: '/rehome-form', query: { id: draft.animalId } })
-          console.log('載入已儲存的草稿 ID:', draft.animalId)
+        .then((animal) => {
+          console.log('loadDraft - loaded animal:', animal)
+          // 檢查權限：個人動物或收容所動物
+          const isOwner = animal.owner_id === authStore.user?.user_id
+          const isShelterAnimal = animal.shelter_id && 
+                                 authStore.user?.role === 'SHELTER_MEMBER' && 
+                                 authStore.user?.primary_shelter_id === animal.shelter_id
+          
+          console.log('loadDraft - permission check:', { isOwner, isShelterAnimal, animalOwnerId: animal.owner_id, animalShelterId: animal.shelter_id, currentUserId: authStore.user?.user_id, userRole: authStore.user?.role, userShelterId: authStore.user?.primary_shelter_id })
+          
+          if (isOwner || isShelterAnimal) {
+            // 有權限，導航到編輯模式
+            router.replace({ path: '/rehome-form', query: { id: draft.animalId } })
+            console.log('載入已儲存的草稿 ID:', draft.animalId)
+          } else {
+            // 無權限，清除草稿
+            console.warn('無權限編輯草稿中的動物，清除草稿:', draft.animalId)
+            localStorage.removeItem('rehome_draft')
+            // 但仍然載入表單資料
+            Object.assign(formData, draft.formData)
+            uploadedPhotos.value = []
+            currentStep.value = draft.currentStep || 0
+          }
         })
-        .catch(() => {
-          console.warn('草稿中的動物不存在,清除草稿:', draft.animalId)
+        .catch((error) => {
+          console.warn('草稿中的動物不存在,清除草稿:', draft.animalId, error)
           localStorage.removeItem('rehome_draft')
           // 但仍然載入表單資料
           Object.assign(formData, draft.formData)

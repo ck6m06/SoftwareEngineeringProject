@@ -101,6 +101,9 @@ coverage/
 nosetests.xml
 coverage.xml
 *.coveragerc
+test_*.txt
+test_*.json
+test_*.csv
 
 # MinIO data
 minio-data/

@@ -4,8 +4,9 @@
       <!-- 頁面標題 -->
       <div class="page-header">
         <h1 class="page-title">領養申請管理</h1>
-        <p class="page-description" v-if="authStore.isAdmin">查看與管理所有領養申請</p>
-        <p class="page-description" v-else>查看與審核您動物的領養申請</p>
+        <p class="page-description" v-if="authStore.user?.role === 'ADMIN'">查看與管理所有領養申請</p>
+        <p class="page-description" v-else-if="authStore.user?.role === 'SHELTER_MEMBER'">查看與審核收容所動物的領養申請</p>
+        <p class="page-description" v-else>查看與審核您送養動物的領養申請</p>
         <div v-if="route.query.animal_id" class="filter-notice">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -79,6 +80,103 @@
         </button>
       </div>
 
+      <!-- 批次操作區 -->
+      <div v-if="canShowBatchOperations" class="batch-operations">
+        <div class="batch-header">
+          <div class="batch-info">
+            <span class="selected-count">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              已選擇 {{ selectedApplications.length }} 個申請
+            </span>
+            <div class="batch-controls">
+              <button @click="clearSelection" class="clear-btn">清除選擇</button>
+              <button @click="toggleSelectAll" class="select-all-btn">
+                {{ isAllSelected ? '取消全選' : '全選可審核' }}
+              </button>
+            </div>
+          </div>
+          
+          <div class="batch-actions">
+            <div class="relative">
+              <button
+                @click="showBatchMenu = !showBatchMenu"
+                :disabled="batchUpdating"
+                class="batch-btn"
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span>{{ batchUpdating ? '處理中...' : '批次審核' }}</span>
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+
+              <!-- 批次操作選單 -->
+              <div v-if="showBatchMenu" class="batch-menu">
+                <div class="menu-header">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  選擇批次操作
+                </div>
+                
+                <div class="menu-actions">
+                  <button
+                    @click="batchReview('approve')"
+                    :disabled="batchUpdating"
+                    class="menu-item approve"
+                  >
+                    <span class="item-icon">✅</span>
+                    <div>
+                      <div class="item-title">批次通過</div>
+                      <div class="item-desc">通過選中的所有申請</div>
+                    </div>
+                  </button>
+                  
+                  <button
+                    @click="batchReview('reject')"
+                    :disabled="batchUpdating"
+                    class="menu-item reject"
+                  >
+                    <span class="item-icon">❌</span>
+                    <div>
+                      <div class="item-title">批次拒絕</div>
+                      <div class="item-desc">拒絕選中的所有申請</div>
+                    </div>
+                  </button>
+                </div>
+                
+                <div class="menu-footer">
+                  <button @click="showBatchMenu = false" class="cancel-btn">取消</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- 已選申請預覽 -->
+        <div v-if="selectedApplications.length > 0 && selectedApplications.length <= 5" class="selected-preview">
+          <div class="preview-title">已選中的申請：</div>
+          <div class="preview-items">
+            <div
+              v-for="appId in selectedApplications.slice(0, 5)"
+              :key="appId"
+              class="preview-item"
+            >
+              <span class="item-icon">📋</span>
+              {{ getApplicationName(appId) }}
+              <button @click="toggleApplication(appId)" class="remove-btn">×</button>
+            </div>
+            <div v-if="selectedApplications.length > 5" class="more-items">
+              還有 {{ selectedApplications.length - 5 }} 個...
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Loading -->
       <div v-if="loading" class="loading-container">
         <div class="spinner"></div>
@@ -87,11 +185,43 @@
 
       <!-- 申請列表 -->
       <div v-else-if="applications.length > 0" class="applications-list">
+        <!-- 列表標題和全選控制 -->
+        <div class="list-header">
+          <div class="list-controls">
+            <div class="select-all-control">
+              <input
+                type="checkbox"
+                :checked="isAllSelected"
+                :indeterminate="selectedApplications.length > 0 && !isAllSelected"
+                @change="toggleSelectAll"
+                class="select-checkbox"
+              />
+              <label @click="toggleSelectAll" class="select-label">
+                {{ isAllSelected ? '取消全選' : selectedApplications.length > 0 ? '全選可審核' : '全選' }}
+              </label>
+            </div>
+            <div v-if="selectedApplications.length > 0" class="selection-info">
+              已選 {{ selectedApplications.length }}/{{ applications.filter(app => canReview(app)).length }}
+            </div>
+          </div>
+        </div>
+
         <div
           v-for="application in applications"
           :key="application.application_id"
           class="application-card"
+          :class="{ 'selected': selectedApplications.includes(application.application_id) }"
         >
+          <!-- 選擇框 -->
+          <div v-if="canReview(application)" class="selection-checkbox">
+            <input
+              type="checkbox"
+              :checked="selectedApplications.includes(application.application_id)"
+              @change="toggleApplication(application.application_id)"
+              class="select-checkbox"
+            />
+          </div>
+
           <!-- 卡片頭部 -->
           <div class="card-header">
             <div class="applicant-info">
@@ -281,7 +411,12 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
         </svg>
         <h3>目前沒有{{ getFilterText() }}的申請</h3>
-        <p>當有新的申請時，將會顯示在這裡</p>
+        <p v-if="authStore.user?.role === 'SHELTER_MEMBER'">
+          當有人申請您收容所的動物時，將會顯示在這裡
+        </p>
+        <p v-else>
+          當有人申請您送養的動物時，將會顯示在這裡
+        </p>
       </div>
 
       <!-- 分頁 -->
@@ -328,7 +463,17 @@
                 <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
-                <span class="text-sm text-blue-800">送養人資訊: 您就是送養人,這是別人對您動物的領養申請</span>
+                <span class="text-sm text-blue-800">
+                  <template v-if="selectedApplication.animal?.owner_id === authStore.user?.user_id">
+                    送養人資訊: 您就是送養人,這是別人對您動物的領養申請
+                  </template>
+                  <template v-else-if="selectedApplication.animal?.shelter_id && authStore.user?.role === 'SHELTER_MEMBER'">
+                    收容所資訊: 您是收容所成員,這是對您收容所動物的領養申請
+                  </template>
+                  <template v-else>
+                    審核權限: 您正在審核此領養申請
+                  </template>
+                </span>
               </div>
 
               <div class="summary-section">
@@ -409,7 +554,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import {
   getApplications,
@@ -429,6 +574,9 @@ const loading = ref(false)
 const submitting = ref(false)
 const applications = ref<Application[]>([])
 const currentFilter = ref<string>('all')
+const selectedApplications = ref<number[]>([])
+const showBatchMenu = ref(false)
+const batchUpdating = ref(false)
 const pagination = ref({
   page: 1,
   per_page: 10,
@@ -461,11 +609,131 @@ const stats = computed(() => {
   }
 })
 
+// 批次選擇相關
+const isAllSelected = computed(() => {
+  const reviewableApps = applications.value.filter(app => canReview(app))
+  return reviewableApps.length > 0 && selectedApplications.value.length === reviewableApps.length
+})
+
+const canShowBatchOperations = computed(() => {
+  return selectedApplications.value.length > 0 && 
+         selectedApplications.value.some(id => {
+           const app = applications.value.find(a => a.application_id === id)
+           return app && canReview(app)
+         })
+})
+
+// 批次選擇功能
+const toggleApplication = (applicationId: number) => {
+  const index = selectedApplications.value.indexOf(applicationId)
+  if (index > -1) {
+    selectedApplications.value.splice(index, 1)
+  } else {
+    selectedApplications.value.push(applicationId)
+  }
+}
+
+const toggleSelectAll = () => {
+  const reviewableApps = applications.value.filter(app => canReview(app))
+  if (isAllSelected.value) {
+    selectedApplications.value = []
+  } else {
+    selectedApplications.value = reviewableApps.map(app => app.application_id)
+  }
+}
+
+const clearSelection = () => {
+  selectedApplications.value = []
+}
+
+const getApplicationName = (applicationId: number): string => {
+  const app = applications.value.find(a => a.application_id === applicationId)
+  if (!app) return `申請 #${applicationId}`
+  
+  const animalName = app.animal?.name || '未命名動物'
+  const applicantName = app.applicant?.username || app.applicant?.email || '未知申請人'
+  return `${animalName} - ${applicantName}`
+}
+
+// 批次審核功能
+const batchReview = async (action: 'approve' | 'reject') => {
+  if (selectedApplications.value.length === 0) {
+    alert('請先選擇要操作的申請')
+    return
+  }
+
+  const actionText = action === 'approve' ? '通過' : '拒絕'
+  const confirmText = `確定要批次${actionText} ${selectedApplications.value.length} 個申請嗎？`
+  
+  if (!confirm(confirmText)) {
+    return
+  }
+
+  showBatchMenu.value = false
+  batchUpdating.value = true
+
+  try {
+    let successCount = 0
+    let failedCount = 0
+    const errors: string[] = []
+
+    for (const applicationId of selectedApplications.value) {
+      try {
+        const application = applications.value.find(a => a.application_id === applicationId)
+        if (!application) continue
+
+        await reviewApplication(applicationId, {
+          action,
+          review_notes: `批次${actionText}`,
+          version: application.version
+        })
+        
+        successCount++
+        
+        // 更新本地狀態
+        const appIndex = applications.value.findIndex(a => a.application_id === applicationId)
+        if (appIndex > -1) {
+          applications.value[appIndex].status = action === 'approve' ? 'APPROVED' : 'REJECTED'
+          applications.value[appIndex].review_notes = `批次${actionText}`
+        }
+        
+      } catch (error: any) {
+        failedCount++
+        const errorMsg = error.response?.data?.message || error.message || '未知錯誤'
+        errors.push(`申請 ID ${applicationId}: ${errorMsg}`)
+        console.error(`❌ 批次${actionText}申請 ${applicationId} 失敗:`, error)
+      }
+    }
+
+    // 顯示結果
+    let message = `批次${actionText}完成！\n成功: ${successCount} 個\n失敗: ${failedCount} 個`
+    if (errors.length > 0) {
+      message += `\n\n錯誤詳情:\n${errors.slice(0, 3).join('\n')}`
+      if (errors.length > 3) {
+        message += `\n... 還有 ${errors.length - 3} 個錯誤`
+      }
+    }
+    alert(message)
+
+    selectedApplications.value = []
+    
+    // 重新載入數據以確保同步
+    await fetchApplications()
+
+  } catch (error: any) {
+    console.error(`❌ 批次${actionText}錯誤:`, error)
+    alert(`批次${actionText}失敗: ${error.message}`)
+  } finally {
+    batchUpdating.value = false
+  }
+}
+
 // 獲取申請列表
 const fetchApplications = async () => {
   loading.value = true
   try {
     const filters: any = {
+      mode: 'review',  // 使用審核模式，只顯示別人對自己動物的申請
       page: pagination.value.page,
       per_page: pagination.value.per_page
     }
@@ -488,6 +756,11 @@ const fetchApplications = async () => {
       total: response.total,
       pages: response.pages
     }
+    
+    // 清除不在當前頁的選擇
+    const currentAppIds = applications.value.map(a => a.application_id)
+    selectedApplications.value = selectedApplications.value.filter(id => currentAppIds.includes(id))
+    
   } catch (error) {
     console.error('Failed to fetch applications:', error)
   } finally {
@@ -585,20 +858,31 @@ const getSexText = (sex?: string) => {
   return sex ? map[sex] || sex : '-'
 }
 
-// 權限檢查 - 只有送養人可以審核
+// 權限檢查 - 送養人或收容所成員可以審核
 const canReview = (application: Application) => {
   // 檢查申請狀態
   if (application.status !== 'PENDING' && application.status !== 'UNDER_REVIEW') {
     return false
   }
   
-  // 檢查是否為動物的送養人(擁有者)
+  // 檢查是否為動物的送養人(擁有者)或收容所成員
   if (!application.animal || !authStore.user) {
     return false
   }
   
-  // 只有動物擁有者可以審核申請
-  return application.animal.owner_id === authStore.user.user_id
+  // 1. 個人送養動物：只有動物擁有者可以審核申請
+  if (application.animal.owner_id && application.animal.owner_id === authStore.user.user_id) {
+    return true
+  }
+  
+  // 2. 收容所動物：該收容所成員可以審核申請
+  if (application.animal.shelter_id && 
+      authStore.user.role === 'SHELTER_MEMBER' && 
+      authStore.user.primary_shelter_id === application.animal.shelter_id) {
+    return true
+  }
+  
+  return false
 }
 
 // 查看申請詳情
@@ -650,7 +934,22 @@ const submitReview = async () => {
 // 初始化
 onMounted(() => {
   fetchApplications()
+  // 添加點擊外部關閉選單的事件監聽
+  document.addEventListener('click', handleClickOutside)
 })
+
+// 清理事件監聽
+onUnmounted(() => {
+  document.removeEventListener('click', handleClickOutside)
+})
+
+// 點擊外部關閉批次選單
+function handleClickOutside(event: Event) {
+  const target = event.target as HTMLElement
+  if (!target.closest('.batch-actions')) {
+    showBatchMenu.value = false
+  }
+}
 </script>
 
 <style scoped>
@@ -781,6 +1080,314 @@ onMounted(() => {
   overflow-x: auto;
 }
 
+/* 批次操作區域 */
+.batch-operations {
+  background: #f0f9ff;
+  border: 1px solid #0ea5e9;
+  border-radius: 0.5rem;
+  padding: 1rem;
+  margin-bottom: 2rem;
+}
+
+.batch-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.batch-info {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.selected-count {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  color: #0c4a6e;
+}
+
+.batch-controls {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.clear-btn,
+.select-all-btn {
+  padding: 0.25rem 0.75rem;
+  font-size: 0.875rem;
+  border: 1px solid #0ea5e9;
+  background: white;
+  color: #0c4a6e;
+  border-radius: 0.25rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.clear-btn:hover,
+.select-all-btn:hover {
+  background: #0ea5e9;
+  color: white;
+}
+
+.batch-actions {
+  position: relative;
+}
+
+.batch-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: #0ea5e9;
+  color: white;
+  border: none;
+  border-radius: 0.375rem;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.batch-btn:hover {
+  background: #0284c7;
+}
+
+.batch-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.batch-menu {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  margin-top: 0.5rem;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.5rem;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+  min-width: 250px;
+  z-index: 50;
+  overflow: hidden;
+}
+
+.menu-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  font-weight: 500;
+  color: #374151;
+  font-size: 0.875rem;
+}
+
+.menu-actions {
+  padding: 0.5rem 0;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border: none;
+  background: none;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  text-align: left;
+}
+
+.menu-item:hover {
+  background: #f1f5f9;
+}
+
+.menu-item.approve:hover {
+  background: #f0fdf4;
+}
+
+.menu-item.reject:hover {
+  background: #fef2f2;
+}
+
+.menu-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.item-icon {
+  font-size: 1.25rem;
+  flex-shrink: 0;
+}
+
+.item-title {
+  font-weight: 500;
+  color: #1f2937;
+  font-size: 0.875rem;
+}
+
+.item-desc {
+  color: #6b7280;
+  font-size: 0.75rem;
+}
+
+.menu-footer {
+  padding: 0.5rem 1rem;
+  border-top: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.cancel-btn {
+  width: 100%;
+  padding: 0.5rem;
+  background: #f3f4f6;
+  border: none;
+  border-radius: 0.25rem;
+  color: #374151;
+  cursor: pointer;
+  font-size: 0.875rem;
+  transition: background-color 0.2s;
+}
+
+.cancel-btn:hover {
+  background: #e5e7eb;
+}
+
+.selected-preview {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #bae6fd;
+}
+
+.preview-title {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #0c4a6e;
+  margin-bottom: 0.5rem;
+}
+
+.preview-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.preview-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0.75rem;
+  background: white;
+  border: 1px solid #0ea5e9;
+  border-radius: 1rem;
+  font-size: 0.75rem;
+  color: #0c4a6e;
+}
+
+.remove-btn {
+  margin-left: 0.25rem;
+  background: none;
+  border: none;
+  color: #6b7280;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0;
+}
+
+.remove-btn:hover {
+  color: #ef4444;
+}
+
+.more-items {
+  padding: 0.25rem 0.75rem;
+  background: #e2e8f0;
+  color: #64748b;
+  border-radius: 1rem;
+  font-size: 0.75rem;
+}
+
+/* 列表控制 */
+.list-header {
+  margin-bottom: 1rem;
+  padding: 1rem;
+  background: white;
+  border-radius: 0.5rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.list-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.select-all-control {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.select-checkbox {
+  width: 1rem;
+  height: 1rem;
+  border-radius: 0.25rem;
+  border: 1px solid #d1d5db;
+  cursor: pointer;
+  accent-color: #3b82f6;
+}
+
+.select-label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #374151;
+  cursor: pointer;
+  user-select: none;
+}
+
+.selection-info {
+  font-size: 0.875rem;
+  color: #3b82f6;
+  font-weight: 500;
+}
+
+/* 申請卡片選擇狀態 */
+.application-card {
+  position: relative;
+  background: white;
+  border-radius: 0.5rem;
+  padding: 1.5rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  transition: all 0.2s;
+  border: 2px solid transparent;
+}
+
+.application-card.selected {
+  border-color: #3b82f6;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  background: #fafbff;
+}
+
+.application-card:hover {
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.selection-checkbox {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  z-index: 10;
+}
+
 .filter-tab {
   padding: 0.75rem 1.5rem;
   border: none;
@@ -816,23 +1423,10 @@ onMounted(() => {
   color: #2c5282;
 }
 
-/* 申請列表 */
 .applications-list {
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
-}
-
-.application-card {
-  background: white;
-  border-radius: 0.5rem;
-  padding: 1.5rem;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  transition: box-shadow 0.2s;
-}
-
-.application-card:hover {
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
 }
 
 .card-header {
@@ -1423,6 +2017,34 @@ onMounted(() => {
     grid-template-columns: 1fr;
   }
   
+  .batch-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.75rem;
+  }
+  
+  .batch-info {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+  
+  .batch-controls {
+    justify-content: space-between;
+  }
+  
+  .list-controls {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+  
+  .batch-menu {
+    left: 0;
+    right: 0;
+    min-width: auto;
+  }
+  
   .animal-info {
     flex-direction: column;
   }
@@ -1440,6 +2062,15 @@ onMounted(() => {
   .card-actions button,
   .card-actions a {
     width: 100%;
+  }
+  
+  .selection-checkbox {
+    top: 0.5rem;
+    right: 0.5rem;
+  }
+  
+  .application-card.selected {
+    margin: 0 0.25rem;
   }
 }
 </style>

@@ -34,6 +34,7 @@ export interface ApplicationFilters {
   status?: string
   animal_id?: number
   applicant_id?: number
+  mode?: 'all' | 'review' | 'my'  // 新增查詢模式
   page?: number
   per_page?: number
 }

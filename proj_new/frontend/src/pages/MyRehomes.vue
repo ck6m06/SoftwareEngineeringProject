@@ -10,6 +10,23 @@
       </router-link>
     </div>
 
+    <!-- 收容所會員提示 -->
+    <div v-if="authStore.user?.role === 'SHELTER_MEMBER'" class="bg-blue-50 border border-blue-200 rounded-lg p-6 mb-8">
+      <div class="flex items-start gap-3">
+        <div class="text-2xl">💡</div>
+        <div>
+          <h2 class="text-lg font-semibold text-blue-900 mb-2">收容所會員提醒</h2>
+          <p class="text-blue-800 mb-3">您正在查看<strong>單次送養</strong>的動物。如需管理<strong>收容所批次</strong>的動物，請使用：</p>
+          <button
+            @click="router.push('/shelter/animals')"
+            class="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition"
+          >
+            🐾 前往收容所動物管理
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- 狀態篩選 -->
     <div class="filters mb-6 flex gap-2">
       <button

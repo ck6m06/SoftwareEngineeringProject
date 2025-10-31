@@ -114,7 +114,7 @@ interface Animal {
   sex?: 'MALE' | 'FEMALE' | 'UNKNOWN'
   dob?: string
   description?: string
-  status: 'DRAFT' | 'SUBMITTED' | 'PUBLISHED' | 'RETIRED'
+  status: 'DRAFT' | 'SUBMITTED' | 'PUBLISHED' | 'ADOPTED' | 'RETIRED'
   shelter_id?: number
   owner_id?: number
   created_by?: number

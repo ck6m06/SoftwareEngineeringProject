@@ -15,6 +15,14 @@ export interface User {
   phone_number: string | null
   first_name: string | null
   last_name: string | null
+  region: string | null
+  address: {
+    district?: string
+    street?: string
+    postal_code?: string
+    city?: string
+    country?: string
+  } | null
   role: 'ADMIN' | 'SHELTER_MEMBER' | 'GENERAL_MEMBER'
   verified: boolean
   primary_shelter_id: number | null
@@ -32,6 +40,14 @@ export interface UserUpdateData {
   phone_number?: string
   first_name?: string
   last_name?: string
+  region?: string
+  address?: {
+    district?: string
+    street?: string
+    postal_code?: string
+    city?: string
+    country?: string
+  }
   profile_photo_url?: string
   settings?: Record<string, any>
 }

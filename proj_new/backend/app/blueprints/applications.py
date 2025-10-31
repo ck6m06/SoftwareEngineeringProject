@@ -40,24 +40,47 @@ def list_applications():
         # - 管理員: 可以看到所有申請
         # - 送養人: 只能看到針對自己動物的申請
         # - 申請人: 只能看到自己提交的申請
+        
+        # 檢查查詢模式
+        mode = request.args.get('mode', 'all')  # 'all', 'review', 'my'
+        
         if current_user.role == UserRole.ADMIN:
             # 管理員可以看到所有申請,不需要額外過濾
             pass
         else:
             # 非管理員: 查詢自己擁有的動物ID列表
-            owned_animal_ids = db.session.query(Animal.animal_id).filter_by(
+            owned_animal_ids = []
+            
+            # 1. 查詢個人送養動物 (owner_id = 當前用戶)
+            personal_animals = db.session.query(Animal.animal_id).filter_by(
                 owner_id=current_user_id,
                 deleted_at=None
             ).all()
-            owned_animal_ids = [aid[0] for aid in owned_animal_ids]
+            owned_animal_ids.extend([aid[0] for aid in personal_animals])
             
-            # 只能看到: 自己提交的申請 OR 針對自己動物的申請
-            query = query.filter(
-                or_(
-                    Application.applicant_id == current_user_id,
-                    Application.animal_id.in_(owned_animal_ids)
+            # 2. 如果是收容所成員，查詢所屬收容所的動物 (shelter_id = 用戶所屬收容所)
+            if current_user.role == UserRole.SHELTER_MEMBER and current_user.primary_shelter_id:
+                shelter_animals = db.session.query(Animal.animal_id).filter_by(
+                    shelter_id=current_user.primary_shelter_id,
+                    deleted_at=None
+                ).all()
+                owned_animal_ids.extend([aid[0] for aid in shelter_animals])
+            
+            # 根據模式決定過濾條件
+            if mode == 'review':
+                # 審核模式: 只顯示別人對自己動物的申請 (不包括自己提交的申請)
+                query = query.filter(Application.animal_id.in_(owned_animal_ids))
+            elif mode == 'my':
+                # 我的申請模式: 只顯示自己提交的申請
+                query = query.filter_by(applicant_id=current_user_id)
+            else:
+                # 默認模式 (向後兼容): 自己提交的申請 OR 針對自己動物的申請
+                query = query.filter(
+                    or_(
+                        Application.applicant_id == current_user_id,
+                        Application.animal_id.in_(owned_animal_ids)
+                    )
                 )
-            )
         
         # 過濾條件
         if 'status' in request.args:
@@ -251,8 +274,17 @@ def get_application(application_id):
         animal = Animal.query.get(application.animal_id)
         
         is_applicant = application.applicant_id == current_user_id
-        is_owner = animal and animal.owner_id == current_user_id
         is_admin = current_user.role == UserRole.ADMIN
+        
+        # 檢查是否為動物擁有者 (個人送養或收容所成員)
+        is_owner = False
+        if animal:
+            # 個人送養動物
+            if animal.owner_id and animal.owner_id == current_user_id:
+                is_owner = True
+            # 收容所動物且當前用戶是該收容所成員
+            elif animal.shelter_id and current_user.role == UserRole.SHELTER_MEMBER and current_user.primary_shelter_id == animal.shelter_id:
+                is_owner = True
         
         if not (is_applicant or is_owner or is_admin):
             abort(403, message='無權限查看此申請')
@@ -293,12 +325,21 @@ def review_application(application_id):
         if not animal:
             abort(404, message='動物不存在')
         
-        # 只有送養人可以審核,管理員也不行
-        if animal.owner_id != current_user_id:
+        # 檢查是否有權限審核 (個人送養或收容所成員)
+        has_permission = False
+        
+        # 個人送養動物: 只有動物擁有者可以審核
+        if animal.owner_id and animal.owner_id == current_user_id:
+            has_permission = True
+        # 收容所動物: 該收容所的成員可以審核
+        elif animal.shelter_id and current_user.role == UserRole.SHELTER_MEMBER and current_user.primary_shelter_id == animal.shelter_id:
+            has_permission = True
+        
+        if not has_permission:
             if current_user.role == UserRole.ADMIN:
-                abort(403, message='領養申請應由送養人審核,管理員無權審核')
+                abort(403, message='領養申請應由送養人或收容所成員審核,管理員無權審核')
             else:
-                abort(403, message='只有送養人可以審核此申請')
+                abort(403, message='只有送養人或收容所成員可以審核此申請')
         
         data = request.get_json()
         action = data.get('action')  # 'approve' or 'reject'
