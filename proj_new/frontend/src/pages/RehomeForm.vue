@@ -1032,10 +1032,14 @@ async function handleSubmit() {
     // 清除草稿
     localStorage.removeItem('rehome_draft')
 
-    // 導向到我的送養列表
+    // 導向到合適的頁面：收容所成員在單次送養後應回到「收容所動物管理」，其他使用者回到「我的送養」
     const message = isEditMode.value ? '送養資訊已更新並提交審核成功!' : '送養資訊已建立並提交審核成功!'
     alert(message + '\n審核通過後將會公開顯示。')
-    router.push('/my-rehomes')
+    if (authStore.user?.role === 'SHELTER_MEMBER') {
+      router.push('/shelter/animals')
+    } else {
+      router.push('/my-rehomes')
+    }
   } catch (error: any) {
     console.error('Submit error:', error)
     
@@ -1082,7 +1086,11 @@ async function handleSubmit() {
         }
         
         alert('送養資訊已建立成功!')
-        router.push('/my-rehomes')
+        if (authStore.user?.role === 'SHELTER_MEMBER') {
+          router.push('/shelter/animals')
+        } else {
+          router.push('/my-rehomes')
+        }
         return
       } catch (retryError) {
         alert('重新建立送養資訊失敗')

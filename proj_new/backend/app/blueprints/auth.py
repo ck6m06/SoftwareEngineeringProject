@@ -40,6 +40,7 @@ def register():
             abort(400, message=f'無效的角色: {data["role"]}')
     
     # 建立新使用者
+    # 預設不自動標為已驗證，需透過 Email 驗證流程完成
     user = User(
         email=data['email'],
         password_hash=hash_password(data['password']),
@@ -48,28 +49,23 @@ def register():
         last_name=data.get('last_name'),
         phone_number=data.get('phone_number'),
         role=user_role,
-        verified=True  # 開發環境自動驗證，生產環境應改為 False
+        verified=False
     )
     
     db.session.add(user)
     db.session.commit()
     
-    # 發送驗證郵件 (開發環境可選)
-    # 注意: 由於 verified=True，此郵件僅供參考
+    # 產生驗證 token 並發送驗證郵件（非自動登入）
     token = generate_verification_token(user.user_id, purpose='email-verify')
     email_service.send_verification_email(
         user_email=user.email,
         username=user.username or user.email,
         token=token
     )
-    
-    # 自動登入：生成 access token
-    access_token = create_access_token(identity=str(user.user_id))
-    
+
     return jsonify({
-        'message': '註冊成功！帳號已自動驗證',
+        'message': '註冊成功，驗證郵件已發送，請前往收件匣點選連結以啟用帳號',
         'user': user.to_dict(),
-        'access_token': access_token  # 提供 token 以便自動登入
     }), 201
 
 
@@ -90,6 +86,10 @@ def login():
     
     if not user:
         abort(401, message='Email 或密碼錯誤')
+    
+    # 檢查 Email 是否已驗證
+    if not user.verified:
+        abort(403, message='請先驗證 Email，或使用重新發送驗證郵件功能')
     
     # 檢查帳號是否被鎖定
     if user.is_locked:
