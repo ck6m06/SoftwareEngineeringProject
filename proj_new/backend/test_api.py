@@ -1,4 +1,11 @@
 ﻿#!/usr/bin/env python
+import pytest
+
+# This is a legacy interactive API test script intended to be run as a
+# standalone script. Pytest will attempt to collect functions starting with
+# `test_` which breaks automated runs because this module's functions expect
+# positional arguments. Skip this module during automated pytest runs.
+pytest.skip("Skip legacy interactive API script during automated test runs", allow_module_level=True)
 """
 Backend API 完整測試腳本
 測試所有主要 API endpoints
