@@ -253,6 +253,9 @@ def create_animal():
         medical_summary=data.get('medical_summary'),
         created_by=current_user_id
     )
+    # 防護：確保 owner_id 與 shelter_id 不會同時存在
+    if animal.owner_id is not None and animal.shelter_id is not None:
+        abort(400, message='owner_id 與 shelter_id 不能同時存在')
     
     db.session.add(animal)
     db.session.commit()
@@ -321,7 +324,11 @@ def update_animal(animal_id):
         animal.status = AnimalStatus(data['status'])
     if 'medical_summary' in data:
         animal.medical_summary = data['medical_summary']
-    
+
+    # 防護：更新前再檢查互斥條件，避免因其他路徑導致不一致
+    if animal.owner_id is not None and animal.shelter_id is not None:
+        abort(400, message='owner_id 與 shelter_id 不能同時存在')
+
     db.session.commit()
     
     return jsonify({
