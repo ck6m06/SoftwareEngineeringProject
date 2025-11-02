@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = '20251103_add_region_columns'
-down_revision = '54b26531e228'
+down_revision = '24f846716da3'
 branch_labels = None
 depends_on = None
 
