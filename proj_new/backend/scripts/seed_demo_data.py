@@ -100,7 +100,7 @@ def seed():
             print('Animal already exists:', a['name'])
             continue
         cur.execute(
-            "INSERT INTO animals (name, species, sex, dob, shelter_id, owner_id, status, created_by, created_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,NOW())",
+            "INSERT INTO animals (name, species, sex, dob, shelter_id, owner_id, status, created_by, created_at, updated_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,NOW(),NOW())",
             (a['name'], a['species'], a['sex'], a['dob'], a['shelter_id'], a['owner_id'], a['status'], 1)
         )
         conn.commit()
