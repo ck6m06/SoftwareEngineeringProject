@@ -133,7 +133,14 @@ def create_application():
     """
     try:
         current_user_id = int(get_jwt_identity())
+        current_user = User.query.get(current_user_id)
         data = request.get_json()
+
+        # 只有一般會員可以提出領養申請 (管理員與收容所帳號不可申請)
+        if not current_user:
+            abort(404, message='用戶不存在')
+        if current_user.role != UserRole.GENERAL_MEMBER:
+            abort(403, message='只有一般會員可提出領養申請')
         
         # 驗證必填欄位
         if not data.get('animal_id'):
@@ -400,6 +407,52 @@ def review_application(application_id):
                 status=application.status.value,
                 review_notes=application.review_notes
             )
+            # Also send an email to the applicant with contact info of the rehome owner/shelter
+            try:
+                # determine recipient email
+                applicant = User.query.get(application.applicant_id)
+                recipient_email = applicant.email if applicant else None
+
+                # gather contact info from animal owner or shelter
+                contact_info = {}
+                if animal:
+                    if animal.owner_id:
+                        owner = User.query.get(animal.owner_id)
+                        if owner:
+                            contact_info = {
+                                'type': 'owner',
+                                'name': owner.username or f"{owner.first_name or ''} {owner.last_name or ''}".strip(),
+                                'email': owner.email,
+                                'phone': owner.phone_number
+                            }
+                    elif animal.shelter_id:
+                        from app.models.shelter import Shelter
+                        shelter = Shelter.query.get(animal.shelter_id)
+                        if shelter:
+                            contact_info = {
+                                'type': 'shelter',
+                                'name': shelter.name,
+                                'email': shelter.contact_email,
+                                'phone': shelter.contact_phone
+                            }
+
+                # Dispatch Celery task (non-blocking)
+                if recipient_email:
+                    status_str = 'approved' if application.status == ApplicationStatus.APPROVED else 'rejected'
+                    # import the task here to avoid circular import during app initialization
+                    from app.tasks.email_tasks import send_application_notification_email_task
+
+                    send_application_notification_email_task.delay(
+                        recipient_email,
+                        animal.name if animal else f'動物 #{application.animal_id}',
+                        status_str,
+                        application.review_notes,
+                        contact_info
+                    )
+            except Exception as email_err:
+                print(f'發送審核結果 Email 失敗: {email_err}')
+                import traceback
+                traceback.print_exc()
         except Exception as notify_error:
             # 通知失敗不影響主流程
             print(f'通知發送失敗: {notify_error}')

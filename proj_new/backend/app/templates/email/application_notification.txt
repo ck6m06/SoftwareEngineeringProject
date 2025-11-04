@@ -1,0 +1,30 @@
+{% if status == 'approved' -%}
+恭喜！{{ animal_name }} 的領養申請已通過。
+{% else -%}
+很抱歉，{{ animal_name }} 的領養申請未通過。
+{% endif %}
+
+{% if message %}
+審核備註內容：
+{{ message }}
+{% endif %}
+
+{% if contact_info %}
+您可以透過以下資訊聯絡送養人：
+
+{% if contact_info.type == 'shelter' %}
+機構名稱：{{ contact_info.name or '無' }}
+信箱：{{ contact_info.email or '無' }}
+電話：{{ contact_info.phone or '無' }}
+{% else %}
+姓名：{{ contact_info.name or '無' }}
+信箱：{{ contact_info.email or '無' }}
+電話：{{ contact_info.phone or '無' }}
+{% endif %}
+{% if status == 'approved' %}
+請盡快與送養人聯繫安排取養事宜。
+{% endif %}
+{% endif %}
+
+{{ current_app.config.get('APP_NAME','貓狗領養平台') }} 團隊
+敬上

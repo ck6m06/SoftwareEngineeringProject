@@ -95,6 +95,68 @@ class EmailService:
         body = f"您的註冊驗證碼為： {code}\n此驗證碼於 {expires_minutes} 分鐘後失效。如非您本人操作，請忽略本信。"
         return self._send_via_smtp(subject, user_email, body)
 
+    def send_email(self, to: str, subject: str, template: str | None = None, context: dict | None = None, html: str | None = None) -> bool:
+        """
+        通用的發信方法，支援簡單模板上下文渲染。
+
+        如果有對應的模板檔案 (templates/email/{template}.txt 或 .html)，會使用 Jinja2 渲染；
+        否則會以簡單文字格式組裝郵件內容，並包含 context 中的 contact_info（若有）。
+        """
+        ctx = context or {}
+        # ensure templates that reference `current_app` can render
+        render_ctx = dict(ctx)
+        render_ctx.setdefault('current_app', current_app)
+
+        # Try to render template files if available
+        body = None
+        try:
+            if template:
+                # Attempt plaintext template first. Use render_ctx so templates can access current_app.
+                try:
+                    tmpl = current_app.jinja_env.get_template(f'email/{template}.txt')
+                    body = tmpl.render(**render_ctx)
+                except Exception:
+                    # try html template as fallback for plaintext (strip tags) or set html
+                    try:
+                        html_tmpl = current_app.jinja_env.get_template(f'email/{template}.html')
+                        html_content = html_tmpl.render(**render_ctx)
+                        body = html_content
+                        html = html or html_content
+                    except Exception:
+                        body = None
+
+        except Exception:
+            body = None
+
+        # If no template rendered, build a simple plaintext message
+        if not body:
+            lines = [f"{subject}", "", ctx.get('message') or '您好，這是系統通知。', ""]
+            animal = ctx.get('animal_name')
+            if animal:
+                lines.insert(1, f"動物：{animal}")
+            status = ctx.get('status')
+            if status:
+                lines.insert(2, f"狀態：{status}")
+
+            # Append contact info if provided
+            contact = ctx.get('contact_info') or {}
+            if contact:
+                lines.append('')
+                lines.append('聯絡資訊：')
+                if contact.get('type') == 'shelter':
+                    lines.append(f"機構名稱：{contact.get('name','')}")
+                    lines.append(f"信箱：{contact.get('email','')}")
+                    lines.append(f"電話：{contact.get('phone','')}")
+                else:
+                    # personal owner
+                    lines.append(f"姓名：{contact.get('name','')}")
+                    lines.append(f"信箱：{contact.get('email','')}")
+                    lines.append(f"電話：{contact.get('phone','')}")
+
+            body = '\n'.join([l for l in lines if l is not None])
+
+        return self._send_via_smtp(subject, to, body, html)
+
 
 # 創建單例
 email_service = EmailService()

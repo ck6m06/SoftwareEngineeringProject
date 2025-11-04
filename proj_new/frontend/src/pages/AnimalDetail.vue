@@ -99,7 +99,8 @@
                   <span class="text-2xl">🏠</span>
                   <span class="text-lg font-semibold text-green-800">收容所</span>
                 </div>
-                <div v-if="shelterInfo" class="space-y-2 text-sm">
+                <div v-if="shelterLoaded">
+                  <div v-if="shelterInfo" class="space-y-2 text-sm">
                   <div class="flex items-center gap-2 text-gray-700">
                     <span class="text-green-600">📍</span>
                     <span class="font-medium">地區：</span>
@@ -115,6 +116,18 @@
                     <span class="font-medium">機構名稱：</span>
                     <span class="font-semibold text-green-800">{{ shelterInfo.name }}</span>
                   </div>
+                  <div v-if="shelterInfo.contact_email" class="flex items-center gap-2 text-gray-700">
+                    <span class="text-green-600">📧</span>
+                    <span class="font-medium">信箱：</span>
+                    <a :href="`mailto:${shelterInfo.contact_email}`" class="text-blue-600 hover:underline">{{ shelterInfo.contact_email }}</a>
+                  </div>
+                  <div v-if="shelterInfo.contact_phone" class="flex items-center gap-2 text-gray-700">
+                    <span class="text-green-600">📞</span>
+                    <span class="font-medium">電話：</span>
+                    <a :href="`tel:${shelterInfo.contact_phone}`" class="text-blue-600 hover:underline">{{ shelterInfo.contact_phone }}</a>
+                  </div>
+                  </div>
+                  <div v-else class="text-sm text-gray-500">無收容所資料</div>
                 </div>
                 <div v-else class="text-sm text-gray-500">載入中...</div>
               </div>
@@ -124,7 +137,8 @@
                   <span class="text-2xl">👤</span>
                   <span class="text-lg font-semibold text-green-800">個人送養</span>
                 </div>
-                <div v-if="ownerInfo" class="space-y-2 text-sm">
+                <div v-if="ownerLoaded">
+                  <div v-if="ownerInfo" class="space-y-2 text-sm">
                   <div class="flex items-center gap-2 text-gray-700">
                     <span class="text-green-600">📍</span>
                     <span class="font-medium">地區：</span>
@@ -135,6 +149,18 @@
                     <span class="font-medium">送養人：</span>
                     <span class="font-semibold text-green-800">{{ ownerInfo.username || '匿名' }}</span>
                   </div>
+                  <div v-if="ownerInfo.email" class="flex items-center gap-2 text-gray-700">
+                    <span class="text-green-600">📧</span>
+                    <span class="font-medium">信箱：</span>
+                    <a :href="`mailto:${ownerInfo.email}`" class="text-blue-600 hover:underline">{{ ownerInfo.email }}</a>
+                  </div>
+                  <div v-if="ownerInfo.phone_number" class="flex items-center gap-2 text-gray-700">
+                    <span class="text-green-600">📞</span>
+                    <span class="font-medium">電話：</span>
+                    <a :href="`tel:${ownerInfo.phone_number}`" class="text-blue-600 hover:underline">{{ ownerInfo.phone_number }}</a>
+                  </div>
+                  </div>
+                  <div v-else class="text-sm text-gray-500">無送養者資料</div>
                 </div>
                 <div v-else class="text-sm text-gray-500">載入中...</div>
               </div>
@@ -259,7 +285,7 @@
               
               <!-- 我想領養按鈕 (非自己的動物且未被領養且無待審核申請才顯示) -->
               <button
-                v-else-if="animal.status === 'PUBLISHED' && isAuthenticated && !isMyAnimal"
+                v-else-if="animal.status === 'PUBLISHED' && canApplyAsMember && !isMyAnimal"
                 @click="handleApply"
                 class="flex-1 bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 transition"
               >
@@ -534,6 +560,8 @@ const currentImageIndex = ref(0)
 // 來源詳細資訊
 const shelterInfo = ref<any>(null)
 const ownerInfo = ref<any>(null)
+const shelterLoaded = ref(false)
+const ownerLoaded = ref(false)
 
 // 醫療記錄相關
 const medicalRecords = ref<MedicalRecord[]>([])
@@ -559,6 +587,13 @@ const applicationForm = ref({
 })
 
 const isAuthenticated = computed(() => authStore.isAuthenticated)
+
+// 是否允許進行領養申請（僅一般會員）
+const canApplyAsMember = computed(() => {
+  if (!isAuthenticated.value) return false
+  const role = authStore.user?.role
+  return role === 'GENERAL_MEMBER'
+})
 
 // 排序後的圖片
 const sortedImages = computed(() => {
@@ -769,17 +804,38 @@ async function loadAnimal() {
 async function loadSourceInfo() {
   if (!animal.value) return
 
-  try {
-    if (animal.value.shelter_id) {
-      // 載入收容所資訊
+  // reset
+  shelterInfo.value = null
+  ownerInfo.value = null
+  shelterLoaded.value = false
+  ownerLoaded.value = false
+  // If API already returned related objects in animal, use them directly
+  if (animal.value.shelter) {
+    shelterInfo.value = animal.value.shelter
+    shelterLoaded.value = true
+  } else if (animal.value.shelter_id) {
+    try {
       shelterInfo.value = await getShelter(animal.value.shelter_id)
-    } else if (animal.value.owner_id) {
-      // 載入用戶資訊
-      ownerInfo.value = await getUser(animal.value.owner_id)
+    } catch (err: any) {
+      console.error('Load shelter info error:', err)
+      shelterInfo.value = null
+    } finally {
+      shelterLoaded.value = true
     }
-  } catch (err: any) {
-    console.error('Load source info error:', err)
-    // 來源資訊載入失敗不影響主要功能，只記錄錯誤
+  }
+
+  if (animal.value.owner) {
+    ownerInfo.value = animal.value.owner
+    ownerLoaded.value = true
+  } else if (animal.value.owner_id) {
+    try {
+      ownerInfo.value = await getUser(animal.value.owner_id)
+    } catch (err: any) {
+      console.error('Load owner info error:', err)
+      ownerInfo.value = null
+    } finally {
+      ownerLoaded.value = true
+    }
   }
 }
 
@@ -807,7 +863,13 @@ async function loadMedicalRecords(animalId: number) {
 // 處理申請
 function handleApply() {
   if (!animal.value) return
-  
+  // 檢查是否為自己的動物
+  // 前端額外檢查: 只有一般會員可以申請
+  if (!canApplyAsMember.value) {
+    applicationError.value = '僅一般會員可提出領養申請'
+    return
+  }
+
   // 檢查是否為自己的動物
   if (animal.value.created_by === authStore.user?.user_id) {
     applicationError.value = '您不能申請自己刊登的動物'

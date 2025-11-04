@@ -41,12 +41,16 @@ const resending = ref(false)
 const message = ref('')
 const messageClass = ref('bg-green-50 text-green-700')
 
+const roleFromQuery = String(route.query.role || '')
+
 async function submitCode() {
   if (!pendingId || !code.value) return
   loading.value = true
   message.value = ''
   try {
-    await api.post('/auth/verify-registration', { pending_id: pendingId, code: code.value })
+    const payload: any = { pending_id: pendingId, code: code.value }
+    if (roleFromQuery) payload.role = roleFromQuery
+    await api.post('/auth/verify-registration', payload)
     message.value = '驗證成功，請使用您的帳號登入' 
     messageClass.value = 'bg-green-50 text-green-700'
     setTimeout(() => router.push('/login'), 2000)

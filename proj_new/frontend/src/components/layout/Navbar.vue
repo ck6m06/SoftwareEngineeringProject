@@ -85,13 +85,7 @@
               >
                 單次送養
               </router-link>
-              <router-link
-                to="/my/applications"
-                class="text-gray-700 hover:text-blue-600 transition"
-                active-class="text-blue-600 font-semibold"
-              >
-                我的申請
-              </router-link>
+              <!-- 收容所帳號不顯示「我的申請」 -->
             </template>
 
             <!-- 平台管理員功能 -->
@@ -104,13 +98,7 @@
               >
                 管理後台
               </router-link>
-              <router-link
-                to="/my/applications"
-                class="text-gray-700 hover:text-blue-600 transition"
-                active-class="text-blue-600 font-semibold"
-              >
-                我的申請
-              </router-link>
+              <!-- 管理員帳號不顯示「我的申請」 -->
             </template>
             
             <!-- 一般用戶功能 -->
@@ -130,6 +118,7 @@
                 我的送養
               </router-link>
               <router-link
+                v-if="authStore.isAuthenticated && authStore.user?.role === 'GENERAL_MEMBER'"
                 to="/my/applications"
                 class="text-gray-700 hover:text-blue-600 transition"
                 active-class="text-blue-600 font-semibold"
@@ -360,13 +349,7 @@
             >
               單次送養
             </router-link>
-            <router-link
-              to="/my/applications"
-              class="block px-3 py-2 rounded-md text-gray-700 hover:bg-gray-100"
-              @click="showMobileMenu = false"
-            >
-              我的申請
-            </router-link>
+            <!-- 收容所帳號不顯示「我的申請」 -->
           </template>
           
           <!-- 一般會員功能（個人送養者） -->
@@ -386,6 +369,7 @@
               我的送養
             </router-link>
             <router-link
+              v-if="authStore.isAuthenticated && authStore.user?.role === 'GENERAL_MEMBER'"
               to="/my/applications"
               class="block px-3 py-2 rounded-md text-gray-700 hover:bg-gray-100"
               @click="showMobileMenu = false"
@@ -410,13 +394,7 @@
             >
               🔧 管理後台
             </router-link>
-            <router-link
-              to="/my/applications"
-              class="block px-3 py-2 rounded-md text-gray-700 hover:bg-gray-100"
-              @click="showMobileMenu = false"
-            >
-              我的申請
-            </router-link>
+            <!-- 管理員帳號不顯示「我的申請」 -->
           </template>
           
           <button

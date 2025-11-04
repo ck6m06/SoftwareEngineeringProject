@@ -93,7 +93,7 @@ const routes: RouteRecordRaw[] = [
     path: '/my/applications',
     name: 'MyApplications',
     component: MyApplications,
-    meta: { title: '我的申請', requiresAuth: true }
+    meta: { title: '我的申請', requiresAuth: true, requiresRole: 'GENERAL_MEMBER' }
   },
   {
     path: '/my-rehomes',

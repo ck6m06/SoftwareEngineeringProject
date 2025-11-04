@@ -335,6 +335,16 @@ def verify_registration_code():
         abort(409, message='此 email 已被註冊')
 
     # create user
+    # determine role: prefer role provided in request body (sent from frontend), otherwise default to GENERAL_MEMBER
+    requested_role = data.get('role')
+    role_to_set = UserRole.GENERAL_MEMBER
+    if requested_role:
+        try:
+            role_to_set = UserRole(requested_role)
+        except ValueError:
+            # invalid role requested - default to GENERAL_MEMBER
+            role_to_set = UserRole.GENERAL_MEMBER
+
     user = User(
         email=pending.email,
         password_hash=pending.password_hash,
@@ -342,6 +352,7 @@ def verify_registration_code():
         phone_number=pending.phone_number,
         region=pending.region,
         address=pending.address,
+        role=role_to_set,
         verified=True
     )
     db.session.add(user)

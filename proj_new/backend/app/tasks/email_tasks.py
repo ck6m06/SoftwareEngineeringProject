@@ -5,6 +5,7 @@ from typing import Dict, Any
 
 from app.celery import celery
 from app.services.email_service import email_service
+import logging
 
 
 @celery.task(bind=True, max_retries=3, retry_backoff=True)
@@ -80,7 +81,8 @@ def send_application_notification_email_task(
     user_email: str,
     animal_name: str,
     status: str,
-    message: str = None
+    message: str = None,
+    contact_info: dict = None
 ) -> Dict[str, Any]:
     """
     非同步發送申請狀態通知郵件
@@ -95,6 +97,18 @@ def send_application_notification_email_task(
         發送結果
     """
     try:
+        # log contact info for easier verification in worker logs
+        logger = logging.getLogger(__name__)
+        try:
+            logger.info(
+                "send_application_notification_email_task: recipient=%s status=%s contact_info=%s",
+                user_email,
+                status,
+                contact_info
+            )
+        except Exception:
+            # don't fail the task because of logging
+            logger.exception('Failed logging contact_info')
         # 根據狀態發送不同郵件
         subject_map = {
             'approved': f'您的領養申請已通過 - {animal_name}',
@@ -109,7 +123,8 @@ def send_application_notification_email_task(
             context={
                 'animal_name': animal_name,
                 'status': status,
-                'message': message
+                'message': message,
+                'contact_info': contact_info or {}
             }
         )
         
