@@ -175,6 +175,8 @@ const isLoading = ref(false)
 const errorMessage = ref('')
 const successMessage = ref('')
 
+// no modal: navigate to VerifyRegistration page after register
+
 // 驗證 Email 格式
 function validateEmail(email: string): boolean {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -213,6 +215,23 @@ function validateForm(): boolean {
   return isValid
 }
 
+// 將 email 做簡單遮蔽，例如 a***@domain.com
+function maskEmail(email: string): string {
+  try {
+    const parts = email.split('@')
+    if (parts.length !== 2) return email
+    const local = parts[0]
+    const domain = parts[1]
+    if (local.length <= 2) {
+      return `${local[0]}***@${domain}`
+    }
+    const maskedLocal = `${local[0]}${'*'.repeat(Math.max(1, local.length - 2))}${local.slice(-1)}`
+    return `${maskedLocal}@${domain}`
+  } catch (e) {
+    return email
+  }
+}
+
 // 處理註冊
 async function handleRegister() {
   errorMessage.value = ''
@@ -236,14 +255,17 @@ async function handleRegister() {
     if (form.last_name) registerData.last_name = form.last_name
     if (form.phone_number) registerData.phone_number = form.phone_number
 
-    await authStore.register(registerData)
+    const resp = await authStore.register(registerData)
 
-    successMessage.value = '註冊成功！請查看您的郵箱進行驗證。3 秒後將跳轉到登入頁面...'
+    // debug: 印出後端回應到瀏覽器 console
+    // eslint-disable-next-line no-console
+    console.log('register response:', resp)
 
-    // 3 秒後跳轉到登入頁面
-    setTimeout(() => {
-      router.push('/login')
-    }, 3000)
+  // 導向驗證頁面（使用後端回傳的 pending_id / masked_email，若無則使用遮蔽 email）
+  const pendingId = resp?.pending_id || ''
+  const masked = resp?.masked_email || maskEmail(form.email)
+  router.push({ name: 'VerifyRegistration', query: { pending_id: pendingId, masked } })
+  return
   } catch (error: any) {
     console.error('Register error:', error)
     
@@ -258,4 +280,8 @@ async function handleRegister() {
     isLoading.value = false
   }
 }
+
+// modal handlers removed (page-based verification flow is used)
 </script>
+
+<!-- removed duplicate modal block (modal is embedded in main template) -->

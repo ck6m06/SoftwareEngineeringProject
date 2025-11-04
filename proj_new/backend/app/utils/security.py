@@ -5,6 +5,9 @@ import bcrypt
 from itsdangerous import URLSafeTimedSerializer
 from flask import current_app
 from typing import Optional
+import hmac
+import hashlib
+import secrets
 
 
 def hash_password(password: str) -> str:
@@ -78,3 +81,34 @@ def verify_token(token: str, purpose: str = 'email-verify', max_age: int = 86400
         return data.get('user_id')
     except Exception:
         return None
+
+
+def generate_numeric_code(length: int = 6) -> str:
+    """
+    產生 numeric 驗證碼 (預設 6 位)
+    """
+    # 使用 cryptographically secure generator
+    if length <= 0:
+        raise ValueError('length must be a positive integer')
+    max_value = 10 ** length
+    # secrets.randbelow(max_value) 回傳 0..max_value-1
+    code = str(secrets.randbelow(max_value)).zfill(length)
+    return code
+
+
+def hash_verification_code(code: str) -> str:
+    """
+    使用 HMAC-SHA256 對驗證碼做簽章，返回 hex 字串
+    """
+    key = current_app.config.get('SECRET_KEY', 'dev-secret').encode('utf-8')
+    mac = hmac.new(key, code.encode('utf-8'), hashlib.sha256)
+    return mac.hexdigest()
+
+
+def verify_verification_code(code: str, code_hash: str) -> bool:
+    """
+    驗證提供的 code 是否與存放的 hash 相符
+    """
+    expected = hash_verification_code(code)
+    # 使用 hmac.compare_digest 避免 timing attack
+    return hmac.compare_digest(expected, code_hash)

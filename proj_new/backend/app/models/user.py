@@ -17,7 +17,8 @@ class User(db.Model):
     """使用者模型"""
     __tablename__ = 'users'
     
-    user_id = db.Column(db.BigInteger, primary_key=True, autoincrement=True)
+    # Use Integer primary key to ensure SQLite in-memory tests auto-increment the id
+    user_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     email = db.Column(db.String(320), unique=True, nullable=False, index=True)
     username = db.Column(db.String(150), nullable=True)
     phone_number = db.Column(db.String(32), nullable=True)

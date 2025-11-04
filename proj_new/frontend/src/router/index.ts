@@ -11,6 +11,7 @@ const Register = () => import('@/pages/Register.vue')
 const ForgotPassword = () => import('@/pages/ForgotPassword.vue')
 const ResetPassword = () => import('@/pages/ResetPassword.vue')
 const EmailVerification = () => import('@/pages/EmailVerification.vue')
+const VerifyRegistration = () => import('@/pages/VerifyRegistration.vue')
 const NotificationCenter = () => import('@/pages/NotificationCenter.vue')
 const MyApplications = () => import('@/pages/MyApplications.vue')
 const MyRehomes = () => import('@/pages/MyRehomes.vue')
@@ -75,6 +76,12 @@ const routes: RouteRecordRaw[] = [
     name: 'EmailVerification',
     component: EmailVerification,
     meta: { title: 'Email 驗證' }
+  },
+  {
+    path: '/verify-registration',
+    name: 'VerifyRegistration',
+    component: VerifyRegistration,
+    meta: { title: '註冊驗證' }
   },
   {
     path: '/notifications',
