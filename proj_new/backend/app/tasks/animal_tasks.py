@@ -70,6 +70,7 @@ def process_animal_batch_import(self, job_id: int) -> Dict[str, Any]:
         
         # === 第一階段: 解析動物 CSV 並建立 animal_code → animal_id 映射 ===
         animal_code_map = {}  # {animal_code: animal_id}
+        animal_code_numeric_map = {}  # {numeric_code: animal_id} for photo matching
         
         try:
             csv_reader = csv.DictReader(io.StringIO(animal_csv_content))
@@ -86,6 +87,87 @@ def process_animal_batch_import(self, job_id: int) -> Dict[str, Any]:
                 
         except Exception as e:
             raise ValueError(f'Invalid CSV format: {str(e)}')
+        
+        # === 預驗證照片格式（在創建任何動物之前） ===
+        if photos_data:
+            import re
+            
+            # 解析檔名格式: {animal_code}_{order}.{ext}
+            filename_pattern = re.compile(r'^(.+?)_(\d+)\.[a-zA-Z]+$')
+            
+            # 首先收集所有動物代碼
+            csv_reader_for_codes = csv.DictReader(io.StringIO(animal_csv_content))
+            expected_animal_codes = []
+            for row in csv_reader_for_codes:
+                animal_code = row.get('animal_code', '').strip()
+                if animal_code:
+                    expected_animal_codes.append(animal_code)
+            
+            # 預驗證所有照片檔名
+            photo_validation_errors = []
+            for photo in photos_data:
+                filename = photo.get('filename', '')
+                match = filename_pattern.match(filename)
+                
+                if not match:
+                    photo_validation_errors.append({
+                        'file': 'photo',
+                        'filename': filename,
+                        'error': f'照片檔名格式錯誤: {filename}. 正確格式應為: {{動物代碼}}_{{序號}}.{{副檔名}}'
+                    })
+                    continue
+                
+                animal_code = match.group(1)
+                
+                # 檢查 animal_code 是否在 CSV 中
+                found = False
+                
+                # 1. 直接匹配
+                if animal_code in expected_animal_codes:
+                    found = True
+                # 2. 數字匹配（處理 "1" vs "001" 情況）
+                else:
+                    try:
+                        numeric_code = int(animal_code)
+                        for expected_code in expected_animal_codes:
+                            try:
+                                if int(expected_code) == numeric_code:
+                                    found = True
+                                    break
+                            except ValueError:
+                                continue
+                    except ValueError:
+                        pass
+                
+                if not found:
+                    photo_validation_errors.append({
+                        'file': 'photo',
+                        'filename': filename,
+                        'error': f'找不到動物代碼: {animal_code}. 可用代碼: {expected_animal_codes[:5]}'
+                    })
+            
+            # 如果有照片格式錯誤，直接失敗
+            if photo_validation_errors:
+                job.status = JobStatus.FAILED
+                job.completed_at = datetime.utcnow()
+                job.result_summary = {
+                    'overall_result': 'failed',
+                    'result_message': f'照片格式驗證失敗：{len(photo_validation_errors)} 個錯誤，匯入已取消',
+                    'has_errors': True,
+                    'animals': {
+                        'total': len(expected_animal_codes),
+                        'success': 0,  # 因為預驗證失敗，沒有動物被匯入
+                        'failed': len(expected_animal_codes)
+                    },
+                    'photos': {
+                        'total': len(photos_data),
+                        'success': 0
+                    },
+                    'error_samples': photo_validation_errors[:10]  # 最多顯示10個錯誤
+                }
+                
+                db.session.commit()
+                return stats
         
         # 重新創建 reader (因為 fieldnames 消耗了迭代器)
         csv_reader = csv.DictReader(io.StringIO(animal_csv_content))
@@ -152,7 +234,7 @@ def process_animal_batch_import(self, job_id: int) -> Dict[str, Any]:
                     dob=dob,
                     description=row['description'].strip(),
                     status=AnimalStatus.DRAFT,
-                    owner_id=job.created_by,  # 設置 owner_id
+                    owner_id=None,  # 收容所動物不設定 owner_id
                     created_by=job.created_by,
                     created_at=datetime.utcnow(),
                     updated_at=datetime.utcnow()
@@ -164,6 +246,15 @@ def process_animal_batch_import(self, job_id: int) -> Dict[str, Any]:
                 
                 # 記錄映射
                 animal_code_map[animal_code] = animal.animal_id
+                
+                # 為照片匹配建立數字版本的映射
+                try:
+                    numeric_code = str(int(animal_code))  # "001" -> "1"
+                    animal_code_numeric_map[numeric_code] = animal.animal_id
+                except ValueError:
+                    # 如果 animal_code 不是數字，使用原始值
+                    animal_code_numeric_map[animal_code] = animal.animal_id
+                
                 stats['success_animals'] += 1
                 
             except Exception as e:
@@ -254,11 +345,10 @@ def process_animal_batch_import(self, job_id: int) -> Dict[str, Any]:
             # Commit 醫療記錄
             db.session.commit()
         
-        # === 第三階段: 處理照片 (選填) ===
+        # === 第四階段: 處理照片 (選填) ===
         if photos_data:
+            # 所有照片已通過預驗證，開始處理
             import re
-            
-            # 解析檔名格式: {animal_code}_{order}.{ext}
             filename_pattern = re.compile(r'^(.+?)_(\d+)\.[a-zA-Z]+$')
             
             for photo in photos_data:
@@ -267,30 +357,36 @@ def process_animal_batch_import(self, job_id: int) -> Dict[str, Any]:
                 try:
                     filename = photo['filename']
                     match = filename_pattern.match(filename)
-                    
-                    if not match:
-                        raise ValueError(f'Invalid filename format: {filename}. Expected: {{animal_code}}_{{order}}.{{ext}}')
-                    
                     animal_code = match.group(1)
                     order = int(match.group(2))
                     
-                    # 檢查 animal_code 是否存在
-                    if animal_code not in animal_code_map:
-                        raise ValueError(f'Unknown animal_code in filename: {animal_code}')
+                    # 找到對應的動物ID（已經預驗證，必定存在）
+                    animal_id = None
+                    if animal_code in animal_code_map:
+                        animal_id = animal_code_map[animal_code]
+                    elif animal_code in animal_code_numeric_map:
+                        animal_id = animal_code_numeric_map[animal_code]
+                    else:
+                        # 嘗試零填充匹配
+                        try:
+                            numeric_code = int(animal_code)
+                            for padding in [2, 3, 4]:
+                                padded_code = str(numeric_code).zfill(padding)
+                                if padded_code in animal_code_map:
+                                    animal_id = animal_code_map[padded_code]
+                                    break
+                        except ValueError:
+                            pass
                     
-                    animal_id = animal_code_map[animal_code]
-                    
-                    # 使用 MinIO URL 和 storage_key (照片已在 shelters.py 上傳到 MinIO)
+                    # 使用 MinIO URL 和 storage_key
                     image_url = photo['url']
                     storage_key = photo['storage_key']
                     
                     animal_image = AnimalImage(
                         animal_id=animal_id,
+                        url=image_url,  # 正確的欄位名稱是 'url'
                         storage_key=storage_key,
-                        url=image_url,
-                        mime_type=photo.get('content_type', 'image/jpeg'),
-                        order=order,
-                        created_at=datetime.utcnow()
+                        order=order
                     )
                     
                     db.session.add(animal_image)
@@ -306,10 +402,38 @@ def process_animal_batch_import(self, job_id: int) -> Dict[str, Any]:
             # Commit 照片記錄
             db.session.commit()
         
-        # 更新 job 狀態為成功
-        job.status = JobStatus.SUCCEEDED
+        # 判斷任務整體結果狀態
+        has_critical_errors = stats['failed_animals'] > 0  # 動物匯入失敗是關鍵錯誤
+        has_minor_errors = stats['total_photos'] > 0 and stats['success_photos'] == 0  # 照片全部失敗
+        has_partial_photo_errors = stats['total_photos'] > stats['success_photos'] > 0  # 部分照片失敗
+        
+        # 決定任務狀態和結果信息
+        if has_critical_errors:
+            # 動物匯入失敗 - 標記為失敗
+            job.status = JobStatus.FAILED
+            overall_result = 'failed'
+            result_message = f'動物匯入失敗：{stats["failed_animals"]}/{stats["total_animals"]} 失敗'
+        elif has_minor_errors:
+            # 所有照片匯入失敗 - 標記為失敗
+            job.status = JobStatus.FAILED 
+            overall_result = 'partial_failed'
+            result_message = f'照片匯入完全失敗：0/{stats["total_photos"]} 成功'
+        elif has_partial_photo_errors:
+            # 部分照片失敗 - 標記為成功但含警告
+            job.status = JobStatus.SUCCEEDED
+            overall_result = 'partial_success'
+            result_message = f'部分成功：照片 {stats["success_photos"]}/{stats["total_photos"]} 成功'
+        else:
+            # 完全成功
+            job.status = JobStatus.SUCCEEDED
+            overall_result = 'success'
+            result_message = '匯入完全成功'
+        
         job.completed_at = datetime.utcnow()
         job.result_summary = {
+            'overall_result': overall_result,
+            'result_message': result_message,
+            'has_errors': len(stats['errors']) > 0,
             'animals': {
                 'total': stats['total_animals'],
                 'success': stats['success_animals'],

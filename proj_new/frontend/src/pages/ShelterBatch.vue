@@ -283,18 +283,90 @@
 
             <!-- 進度資訊 -->
             <div v-if="job.result_summary" class="bg-gray-50 rounded p-3 text-sm">
-              <div v-if="job.status === 'SUCCEEDED'" class="space-y-1">
-                <p class="text-green-800"><strong>✓ 匯入成功</strong></p>
-                <p class="text-gray-700">總計: {{ job.result_summary.total_rows }} 筆</p>
-                <p class="text-gray-700">成功: {{ job.result_summary.success_count }} 筆</p>
-                <p class="text-gray-700">失敗: {{ job.result_summary.failed_count }} 筆</p>
+              <!-- 新的詳細結果顯示 -->
+              <div v-if="job.result_summary.overall_result" class="space-y-2">
+                <!-- 整體結果狀態 -->
+                <div class="flex items-center space-x-2">
+                  <span v-if="job.result_summary.overall_result === 'success'" class="text-green-800">
+                    <strong>✓ {{ job.result_summary.result_message }}</strong>
+                  </span>
+                  <span v-else-if="job.result_summary.overall_result === 'partial_success'" class="text-yellow-800">
+                    <strong>⚠ {{ job.result_summary.result_message }}</strong>
+                  </span>
+                  <span v-else-if="job.result_summary.overall_result === 'partial_failed'" class="text-orange-800">
+                    <strong>⚠ {{ job.result_summary.result_message }}</strong>
+                  </span>
+                  <span v-else class="text-red-800">
+                    <strong>✗ {{ job.result_summary.result_message }}</strong>
+                  </span>
+                </div>
+
+                <!-- 詳細統計 -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-3">
+                  <!-- 動物匯入結果 -->
+                  <div v-if="job.result_summary.animals" class="bg-white rounded p-2">
+                    <p class="font-medium text-gray-800">動物資料</p>
+                    <p class="text-gray-600">總計: {{ job.result_summary.animals.total }} 筆</p>
+                    <p class="text-green-600">成功: {{ job.result_summary.animals.success }} 筆</p>
+                    <p v-if="job.result_summary.animals.failed && job.result_summary.animals.failed > 0" class="text-red-600">失敗: {{ job.result_summary.animals.failed }} 筆</p>
+                  </div>
+
+                  <!-- 照片匯入結果 -->
+                  <div v-if="job.result_summary.photos && job.result_summary.photos.total > 0" class="bg-white rounded p-2">
+                    <p class="font-medium text-gray-800">照片資料</p>
+                    <p class="text-gray-600">總計: {{ job.result_summary.photos.total }} 張</p>
+                    <p :class="job.result_summary.photos.success > 0 ? 'text-green-600' : 'text-gray-500'">
+                      成功: {{ job.result_summary.photos.success }} 張
+                    </p>
+                    <p v-if="job.result_summary.photos.total - job.result_summary.photos.success > 0" class="text-red-600">
+                      失敗: {{ job.result_summary.photos.total - job.result_summary.photos.success }} 張
+                    </p>
+                  </div>
+
+                  <!-- 醫療記錄結果 -->
+                  <div v-if="job.result_summary.medical_records && job.result_summary.medical_records.total > 0" class="bg-white rounded p-2">
+                    <p class="font-medium text-gray-800">醫療記錄</p>
+                    <p class="text-gray-600">總計: {{ job.result_summary.medical_records.total }} 筆</p>
+                    <p class="text-green-600">成功: {{ job.result_summary.medical_records.success }} 筆</p>
+                  </div>
+                </div>
+
+                <!-- 錯誤詳情 -->
+                <div v-if="job.result_summary.has_errors && job.result_summary.error_samples" class="mt-3">
+                  <details class="bg-red-50 rounded p-2">
+                    <summary class="cursor-pointer text-red-800 font-medium">
+                      查看錯誤詳情 ({{ job.result_summary.error_samples.length }} 個錯誤)
+                    </summary>
+                    <div class="mt-2 space-y-1 text-xs">
+                      <div v-for="(error, index) in job.result_summary.error_samples.slice(0, 5)" :key="index" class="bg-white rounded p-2">
+                        <p><strong>檔案:</strong> {{ error.file }}</p>
+                        <p v-if="error.filename"><strong>檔名:</strong> {{ error.filename }}</p>
+                        <p v-if="error.row"><strong>第 {{ error.row }} 行:</strong></p>
+                        <p class="text-red-600"><strong>錯誤:</strong> {{ error.error }}</p>
+                      </div>
+                      <p v-if="job.result_summary.error_samples.length > 5" class="text-gray-500 text-center">
+                        還有 {{ job.result_summary.error_samples.length - 5 }} 個錯誤...
+                      </p>
+                    </div>
+                  </details>
+                </div>
               </div>
-              <div v-else-if="job.status === 'FAILED'" class="text-red-800">
-                <p><strong>✗ 匯入失敗</strong></p>
-                <p class="text-sm mt-1">{{ job.result_summary.error }}</p>
-              </div>
-              <div v-else-if="job.status === 'RUNNING'" class="text-blue-800">
-                <p>⏳ 正在處理中...</p>
+
+              <!-- 舊版格式兼容 -->
+              <div v-else class="space-y-1">
+                <div v-if="job.status === 'SUCCEEDED'" class="space-y-1">
+                  <p class="text-green-800"><strong>✓ 匯入成功</strong></p>
+                  <p class="text-gray-700">總計: {{ job.result_summary.total_rows }} 筆</p>
+                  <p class="text-gray-700">成功: {{ job.result_summary.success_count }} 筆</p>
+                  <p class="text-gray-700">失敗: {{ job.result_summary.failed_count }} 筆</p>
+                </div>
+                <div v-else-if="job.status === 'FAILED'" class="text-red-800">
+                  <p><strong>✗ 匯入失敗</strong></p>
+                  <p class="text-sm mt-1">{{ job.result_summary.error }}</p>
+                </div>
+                <div v-else-if="job.status === 'RUNNING'" class="text-blue-800">
+                  <p>⏳ 正在處理中...</p>
+                </div>
               </div>
             </div>
           </div>
@@ -481,7 +553,7 @@ async function uploadBatch() {
       formData
     )
     
-        alert(`批次匯入已加入隊列!\n任務 ID: ${response.data.job_id}\n\n請前往「動物管理」查看匯入的動物並進行狀態管理`)
+        alert(`批次匯入已加入隊列!\n任務 ID: ${response.data.job_id}\n\n請等待處理完成，如果成功將自動跳轉到動物管理頁面`)
         
         // 清空所有檔案選擇
         clearAnimalCsv()
@@ -491,10 +563,8 @@ async function uploadBatch() {
         // 重新載入任務列表
         await loadJobs()
         
-        // 3秒後跳轉到動物管理頁面
-        setTimeout(() => {
-          router.push('/shelter/animals')
-        }, 3000)  } catch (err: any) {
+        // 監控任務狀態，只有在成功時才跳轉
+        monitorJobCompletion(response.data.job_id)  } catch (err: any) {
     console.error('Upload error:', err)
     console.error('Error response:', err.response?.data)
     console.error('Error status:', err.response?.status)
@@ -517,9 +587,54 @@ async function loadJobs() {
     jobs.value = response.jobs
   } catch (err) {
     console.error('Failed to load jobs:', err)
+    jobs.value = []  // 確保有預設值
   } finally {
     loadingJobs.value = false
   }
+}
+
+// ===== 任務監控 =====
+async function monitorJobCompletion(jobId: string) {
+  const maxAttempts = 30 // 最多檢查30次 (30秒)
+  let attempts = 0
+  
+  const checkInterval = setInterval(async () => {
+    attempts++
+    
+    try {
+      await loadJobs() // 重新載入任務列表
+      
+      // 找到對應的任務
+      const job = jobs.value.find(j => j.job_id === jobId)
+      
+      if (job) {
+        if (job.status === 'SUCCEEDED') {
+          clearInterval(checkInterval)
+          
+          // 檢查結果摘要判斷是否真正成功
+          if (job.result_summary?.overall_result === 'success') {
+            alert('批次匯入成功！即將跳轉到動物管理頁面')
+            setTimeout(() => {
+              router.push('/shelter/animals')
+            }, 2000)
+          } else {
+            alert('批次匯入完成，但有部分錯誤，請查看詳細結果。')
+          }
+        } else if (job.status === 'FAILED') {
+          clearInterval(checkInterval)
+          alert('批次匯入失敗！請查看錯誤詳情。')
+        }
+      }
+      
+      // 超過最大嘗試次數則停止監控
+      if (attempts >= maxAttempts) {
+        clearInterval(checkInterval)
+        alert('任務監控超時，請手動刷新頁面查看結果。')
+      }
+    } catch (error) {
+      console.error('監控任務狀態時出錯:', error)
+    }
+  }, 1000) // 每秒檢查一次
 }
 
 // ===== 範本下載 =====
