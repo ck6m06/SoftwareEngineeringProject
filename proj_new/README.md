@@ -137,7 +137,7 @@ timeout 15  # Windows: timeout /t 15
 # 初始化資料庫（首次啟動時）
 docker-compose exec backend flask db upgrade
 # 如遇到遷移問題，執行：
-docker-compose exec backend flask db stamp f024b1dbf16b
+# docker-compose exec backend flask db stamp f024b1dbf16b
 
 # 建立測試帳號（推薦）
 docker-compose exec backend python create_test_accounts.py

@@ -102,6 +102,7 @@ def upgrade():
     sa.Column('filename', sa.String(length=1024), nullable=True),
     sa.Column('mime_type', sa.String(length=128), nullable=True),
     sa.Column('size', sa.Integer(), nullable=True),
+    sa.Column('meta_data', sa.JSON(), nullable=True),
     sa.Column('created_by', sa.BigInteger(), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=6), nullable=False),
     sa.Column('deleted_at', sa.DateTime(timezone=6), nullable=True),
