@@ -57,7 +57,7 @@ def list_animals():
             current_user_id = int(get_jwt_identity()) if get_jwt_identity() else None
             
             if current_user_id == owner_id:  # 查詢自己的動物
-                current_user = User.query.get(current_user_id)
+                current_user = db.session.get(User, current_user_id)
                 
                 if current_user and current_user.role == UserRole.SHELTER_MEMBER and current_user.primary_shelter_id:
                     # 收容所成員：查詢個人動物 + 收容所動物
@@ -214,7 +214,7 @@ def create_animal():
     ---
     """
     current_user_id = int(get_jwt_identity())
-    user = User.query.get(current_user_id)
+    user = db.session.get(User, current_user_id)
     
     if not user:
         abort(404, message='使用者不存在')
@@ -253,6 +253,9 @@ def create_animal():
         medical_summary=data.get('medical_summary'),
         created_by=current_user_id
     )
+    # 防護：確保 owner_id 與 shelter_id 不會同時存在
+    if animal.owner_id is not None and animal.shelter_id is not None:
+        abort(400, message='owner_id 與 shelter_id 不能同時存在')
     
     db.session.add(animal)
     db.session.commit()
@@ -272,7 +275,7 @@ def update_animal(animal_id):
     問題6: 管理員不應該編輯已上架(PUBLISHED)的動物
     """
     current_user_id = int(get_jwt_identity())
-    user = User.query.get(current_user_id)
+    user = db.session.get(User, current_user_id)
     
     animal = Animal.query.filter_by(animal_id=animal_id, deleted_at=None).first()
     
@@ -321,7 +324,11 @@ def update_animal(animal_id):
         animal.status = AnimalStatus(data['status'])
     if 'medical_summary' in data:
         animal.medical_summary = data['medical_summary']
-    
+
+    # 防護：更新前再檢查互斥條件，避免因其他路徑導致不一致
+    if animal.owner_id is not None and animal.shelter_id is not None:
+        abort(400, message='owner_id 與 shelter_id 不能同時存在')
+
     db.session.commit()
     
     return jsonify({
@@ -338,7 +345,7 @@ def delete_animal(animal_id):
     ---
     """
     current_user_id = int(get_jwt_identity())
-    user = User.query.get(current_user_id)
+    user = db.session.get(User, current_user_id)
     
     animal = Animal.query.filter_by(animal_id=animal_id, deleted_at=None).first()
     
@@ -392,7 +399,7 @@ def add_animal_image(animal_id):
         from app.utils.minio_helper import get_minio_client
         
         current_user_id = int(get_jwt_identity())
-        current_user = User.query.get(current_user_id)
+        current_user = db.session.get(User, current_user_id)
         
         animal = Animal.query.filter_by(animal_id=animal_id, deleted_at=None).first()
         if not animal:
@@ -505,7 +512,7 @@ def delete_animal_image(animal_id, image_id):
     """
     try:
         current_user_id = int(get_jwt_identity())
-        current_user = User.query.get(current_user_id)
+        current_user = db.session.get(User, current_user_id)
         
         animal = Animal.query.filter_by(animal_id=animal_id, deleted_at=None).first()
         if not animal:
@@ -567,7 +574,7 @@ def reorder_animal_images(animal_id):
     """
     try:
         current_user_id = int(get_jwt_identity())
-        current_user = User.query.get(current_user_id)
+        current_user = db.session.get(User, current_user_id)
         
         animal = Animal.query.filter_by(animal_id=animal_id, deleted_at=None).first()
         if not animal:
@@ -633,7 +640,7 @@ def submit_animal(animal_id):
             abort(404, message='動物不存在')
         
         # 權限檢查
-        user = User.query.get(current_user_id)
+        user = db.session.get(User, current_user_id)
         from app.models.user import UserRole
         
         # 檢查權限
@@ -678,7 +685,7 @@ def publish_animal(animal_id):
     """
     try:
         current_user_id = int(get_jwt_identity())
-        current_user = User.query.get(current_user_id)
+        current_user = db.session.get(User, current_user_id)
         
         # 權限檢查
         from app.models.user import UserRole
@@ -715,7 +722,7 @@ def retire_animal(animal_id):
     """
     try:
         current_user_id = int(get_jwt_identity())
-        current_user = User.query.get(current_user_id)
+        current_user = db.session.get(User, current_user_id)
         
         animal = Animal.query.filter_by(animal_id=animal_id, deleted_at=None).first()
         if not animal:

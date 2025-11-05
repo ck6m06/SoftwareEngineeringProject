@@ -118,6 +118,8 @@ class Animal(db.Model):
         
         if include_relations:
             data['shelter'] = self.shelter.to_dict() if self.shelter else None
+            # 若為個人送養，包含 owner 的公開資訊（email / phone 等）
+            data['owner'] = self.owner.to_dict() if self.owner else None
         
         return data
 

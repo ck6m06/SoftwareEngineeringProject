@@ -17,7 +17,8 @@ class Config:
     # Database
     SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL', 'mysql+pymysql://root:password@localhost:3307/pet_adoption')
     SQLALCHEMY_TRACK_MODIFICATIONS = False
-    SQLALCHEMY_ECHO = False
+    # Temporarily enable SQL echo to help debugging (prints SQL statements to logs)
+    SQLALCHEMY_ECHO = True
     
     # JWT
     JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY', SECRET_KEY)
@@ -66,6 +67,15 @@ class Config:
     # Pagination
     DEFAULT_PAGE_SIZE = 20
     MAX_PAGE_SIZE = 100
+    
+    # SMTP / Email settings (optional)
+    SMTP_HOST = os.environ.get('SMTP_HOST')
+    SMTP_PORT = int(os.environ.get('SMTP_PORT', 587)) if os.environ.get('SMTP_PORT') else None
+    SMTP_USER = os.environ.get('SMTP_USER')
+    SMTP_PASSWORD = os.environ.get('SMTP_PASSWORD')
+    SMTP_USE_TLS = os.environ.get('SMTP_USE_TLS', 'true').lower() == 'true'
+    SMTP_USE_SSL = os.environ.get('SMTP_USE_SSL', 'false').lower() == 'true'
+    SMTP_FROM = os.environ.get('SMTP_FROM', os.environ.get('MAIL_DEFAULT_SENDER', 'no-reply@example.com'))
 
 
 class DevelopmentConfig(Config):

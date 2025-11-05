@@ -85,13 +85,7 @@
               >
                 單次送養
               </router-link>
-              <router-link
-                to="/my/applications"
-                class="text-gray-700 hover:text-blue-600 transition"
-                active-class="text-blue-600 font-semibold"
-              >
-                我的申請
-              </router-link>
+              <!-- 收容所帳號不顯示「我的申請」 -->
             </template>
 
             <!-- 平台管理員功能 -->
@@ -104,13 +98,7 @@
               >
                 管理後台
               </router-link>
-              <router-link
-                to="/my/applications"
-                class="text-gray-700 hover:text-blue-600 transition"
-                active-class="text-blue-600 font-semibold"
-              >
-                我的申請
-              </router-link>
+              <!-- 管理員帳號不顯示「我的申請」 -->
             </template>
             
             <!-- 一般用戶功能 -->
@@ -130,6 +118,7 @@
                 我的送養
               </router-link>
               <router-link
+                v-if="authStore.isAuthenticated && authStore.user?.role === 'GENERAL_MEMBER'"
                 to="/my/applications"
                 class="text-gray-700 hover:text-blue-600 transition"
                 active-class="text-blue-600 font-semibold"
@@ -152,6 +141,7 @@
             <!-- 用戶選單 -->
             <div class="relative" ref="userMenuRef">
               <button
+                ref="userButtonRef"
                 @click="toggleUserMenu"
                 class="flex items-center space-x-2 text-gray-700 hover:text-blue-600 transition"
               >
@@ -162,11 +152,14 @@
                 </svg>
               </button>
 
-              <!-- 下拉選單 -->
-              <div
-                v-if="showUserMenu"
-                class="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 z-50"
-              >
+              <!-- 下拉選單 (teleport 到 body，並以絕對座標定位，避免被父層 overflow 或其他元素遮蔽) -->
+              <teleport to="body">
+                <div
+                  v-if="showUserMenu"
+                  ref="dropdownRef"
+                  :style="menuStyle"
+                  class="fixed w-48 bg-white rounded-md shadow-lg py-1 z-50"
+                >
                 <div class="px-4 py-2 border-b border-gray-200">
                   <p class="text-sm text-gray-500">已登入為</p>
                   <p class="text-sm font-semibold text-gray-900 truncate">
@@ -235,6 +228,7 @@
                   登出
                 </button>
               </div>
+              </teleport>
             </div>
           </template>
         </div>
@@ -355,13 +349,7 @@
             >
               單次送養
             </router-link>
-            <router-link
-              to="/my/applications"
-              class="block px-3 py-2 rounded-md text-gray-700 hover:bg-gray-100"
-              @click="showMobileMenu = false"
-            >
-              我的申請
-            </router-link>
+            <!-- 收容所帳號不顯示「我的申請」 -->
           </template>
           
           <!-- 一般會員功能（個人送養者） -->
@@ -381,6 +369,7 @@
               我的送養
             </router-link>
             <router-link
+              v-if="authStore.isAuthenticated && authStore.user?.role === 'GENERAL_MEMBER'"
               to="/my/applications"
               class="block px-3 py-2 rounded-md text-gray-700 hover:bg-gray-100"
               @click="showMobileMenu = false"
@@ -405,13 +394,7 @@
             >
               🔧 管理後台
             </router-link>
-            <router-link
-              to="/my/applications"
-              class="block px-3 py-2 rounded-md text-gray-700 hover:bg-gray-100"
-              @click="showMobileMenu = false"
-            >
-              我的申請
-            </router-link>
+            <!-- 管理員帳號不顯示「我的申請」 -->
           </template>
           
           <button
@@ -437,10 +420,33 @@ const authStore = useAuthStore()
 
 const showUserMenu = ref(false)
 const showMobileMenu = ref(false)
-const userMenuRef = ref<HTMLElement>()
+const userMenuRef = ref<HTMLElement | null>(null)
+const userButtonRef = ref<HTMLElement | null>(null)
+const dropdownRef = ref<HTMLElement | null>(null)
+const menuStyle = ref<Record<string, string>>({})
+
+const MENU_WIDTH_PX = 192 // w-48 (12rem) in px
 
 function toggleUserMenu() {
   showUserMenu.value = !showUserMenu.value
+  if (showUserMenu.value) {
+    // next tick not needed here because getBoundingClientRect works when button is rendered
+    updateMenuPosition()
+  }
+}
+
+function updateMenuPosition() {
+  const btn = userButtonRef.value
+  if (!btn) return
+  const rect = btn.getBoundingClientRect()
+  // We render dropdown as position:fixed, so use viewport coordinates
+  const left = rect.right - MENU_WIDTH_PX
+  const top = rect.bottom
+  menuStyle.value = {
+    position: 'fixed',
+    top: `${Math.max(8, top)}px`,
+    left: `${Math.max(8, left)}px`,
+  }
 }
 
 function toggleMobileMenu() {
@@ -465,16 +471,23 @@ async function handleLogout() {
 
 // 點擊外部關閉用戶選單
 function handleClickOutside(event: MouseEvent) {
-  if (userMenuRef.value && !userMenuRef.value.contains(event.target as Node)) {
+  const target = event.target as Node
+  const clickedInsideButton = userMenuRef.value && userMenuRef.value.contains(target)
+  const clickedInsideDropdown = dropdownRef.value && dropdownRef.value.contains(target)
+  if (!clickedInsideButton && !clickedInsideDropdown) {
     showUserMenu.value = false
   }
 }
 
 onMounted(() => {
   document.addEventListener('click', handleClickOutside)
+  window.addEventListener('resize', updateMenuPosition)
+  window.addEventListener('scroll', updateMenuPosition)
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('click', handleClickOutside)
+  window.removeEventListener('resize', updateMenuPosition)
+  window.removeEventListener('scroll', updateMenuPosition)
 })
 </script>

@@ -8,6 +8,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from flask_jwt_extended import JWTManager
 from redis import Redis
+import logging
 
 # 初始化擴展
 db = SQLAlchemy()
@@ -44,6 +45,13 @@ def create_app(config_name='development'):
     db.init_app(app)
     migrate.init_app(app, db)
     jwt.init_app(app)
+
+    # If SQLALCHEMY_ECHO is enabled, ensure SQLAlchemy engine logs are visible
+    try:
+        if app.config.get('SQLALCHEMY_ECHO'):
+            logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
+    except Exception:
+        pass
     
     # 初始化 Redis
     global redis_client

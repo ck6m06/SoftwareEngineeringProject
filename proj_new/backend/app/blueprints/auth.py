@@ -5,8 +5,9 @@ from flask import request, jsonify
 from flask_smorest import Blueprint, abort
 from flask_jwt_extended import create_access_token, create_refresh_token, jwt_required, get_jwt_identity
 from app import db
-from app.models import User, UserRole
+from app.models import User, UserRole, PendingRegistration
 from app.utils.security import hash_password, verify_password, generate_verification_token, verify_token
+from app.utils.security import generate_numeric_code, hash_verification_code, verify_verification_code
 from app.services.audit_service import audit_service
 from app.services.email_service import email_service
 from datetime import datetime
@@ -39,37 +40,62 @@ def register():
         except ValueError:
             abort(400, message=f'無效的角色: {data["role"]}')
     
-    # 建立新使用者
-    user = User(
+    # 新的註冊流程：先建立 pending registration 並發送數字驗證碼
+    # 檢查 users 或 pending 中是否已存在相同 email
+    if User.query.filter_by(email=data['email']).first():
+        abort(409, message='此 email 已被註冊')
+
+    existing_pending = PendingRegistration.query.filter_by(email=data['email']).first()
+    if existing_pending:
+        # 若存在未過期的 pending，可回傳其 id（或選擇覆寫）
+        return jsonify({
+            'message': '此 email 已有未完成的驗證流程',
+            'pending_id': existing_pending.pending_id
+        }), 200
+
+    pwd_hash = hash_password(data['password'])
+    code = generate_numeric_code(6)
+    code_hash = hash_verification_code(code)
+    from datetime import timedelta
+    expires = datetime.utcnow() + timedelta(minutes=15)
+
+    pending = PendingRegistration(
         email=data['email'],
-        password_hash=hash_password(data['password']),
         username=data.get('username'),
-        first_name=data.get('first_name'),
-        last_name=data.get('last_name'),
         phone_number=data.get('phone_number'),
-        role=user_role,
-        verified=True  # 開發環境自動驗證，生產環境應改為 False
+        region=data.get('region'),
+        address=data.get('address'),
+        password_hash=pwd_hash,
+        verification_code_hash=code_hash,
+        code_expires_at=expires,
+        client_ip=request.remote_addr,
+        user_agent=request.headers.get('User-Agent')
     )
-    
-    db.session.add(user)
+
+    db.session.add(pending)
     db.session.commit()
-    
-    # 發送驗證郵件 (開發環境可選)
-    # 注意: 由於 verified=True，此郵件僅供參考
-    token = generate_verification_token(user.user_id, purpose='email-verify')
-    email_service.send_verification_email(
-        user_email=user.email,
-        username=user.username or user.email,
-        token=token
+
+    # 發送驗證碼（非同步可改為 task）
+    email_service.send_registration_code_email(
+        user_email=pending.email,
+        username=pending.username or pending.email,
+        code=code,
+        expires_minutes=15
     )
-    
-    # 自動登入：生成 access token
-    access_token = create_access_token(identity=str(user.user_id))
-    
+
+    masked = pending.email
+    if '@' in masked:
+        local, domain = masked.split('@', 1)
+        if len(local) > 3:
+            masked = local[:3] + '***@' + domain
+        else:
+            masked = '***@' + domain
+
     return jsonify({
-        'message': '註冊成功！帳號已自動驗證',
-        'user': user.to_dict(),
-        'access_token': access_token  # 提供 token 以便自動登入
+        'message': '驗證碼已發送至電子郵件',
+        'pending_id': pending.pending_id,
+        'masked_email': masked,
+        'expires_in': 15 * 60
     }), 201
 
 
@@ -90,6 +116,10 @@ def login():
     
     if not user:
         abort(401, message='Email 或密碼錯誤')
+    
+    # 檢查 Email 是否已驗證
+    if not user.verified:
+        abort(403, message='請先驗證 Email，或使用重新發送驗證郵件功能')
     
     # 檢查帳號是否被鎖定
     if user.is_locked:
@@ -193,7 +223,7 @@ def verify_email():
         abort(400, message='驗證 token 無效或已過期')
     
     # 查找用戶
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
     
     if not user:
         abort(404, message='使用者不存在')
@@ -266,6 +296,119 @@ def resend_verification():
     }), 200
 
 
+@auth_bp.route('/verify-registration', methods=['POST'])
+def verify_registration_code():
+    """
+    驗證註冊用的一次性數字驗證碼並建立 user
+    Body: { "pending_id": 123, "code": "123456" }
+    """
+    data = request.get_json() or {}
+    pending_id = data.get('pending_id')
+    code = data.get('code')
+
+    if not pending_id or not code:
+        abort(400, message='pending_id 和 code 為必填')
+
+    pending = db.session.get(PendingRegistration, pending_id)
+    if not pending:
+        abort(404, message='找不到對應的驗證流程')
+
+    if pending.code_expires_at < datetime.utcnow():
+        # 刪除過期的 pending
+        db.session.delete(pending)
+        db.session.commit()
+        abort(400, message='驗證碼已過期，請重新註冊或重新發送')
+
+    if not verify_verification_code(code, pending.verification_code_hash):
+        pending.attempts = (pending.attempts or 0) + 1
+        db.session.commit()
+        if pending.attempts >= 5:
+            db.session.delete(pending)
+            db.session.commit()
+            abort(400, message='驗證失敗次數過多，請重新註冊')
+        abort(400, message='驗證碼錯誤')
+
+    # race check: users may have been created in the meantime
+    if User.query.filter_by(email=pending.email).first():
+        db.session.delete(pending)
+        db.session.commit()
+        abort(409, message='此 email 已被註冊')
+
+    # create user
+    # determine role: prefer role provided in request body (sent from frontend), otherwise default to GENERAL_MEMBER
+    requested_role = data.get('role')
+    role_to_set = UserRole.GENERAL_MEMBER
+    if requested_role:
+        try:
+            role_to_set = UserRole(requested_role)
+        except ValueError:
+            # invalid role requested - default to GENERAL_MEMBER
+            role_to_set = UserRole.GENERAL_MEMBER
+
+    user = User(
+        email=pending.email,
+        password_hash=pending.password_hash,
+        username=pending.username,
+        phone_number=pending.phone_number,
+        region=pending.region,
+        address=pending.address,
+        role=role_to_set,
+        verified=True
+    )
+    db.session.add(user)
+    db.session.delete(pending)
+    db.session.commit()
+
+    # log audit
+    audit_service.log(
+        action='user.register',
+        actor_id=user.user_id,
+        target_type='user',
+        target_id=user.user_id,
+        before_state=None,
+        after_state={'email': user.email},
+        shelter_id=None
+    )
+
+    return jsonify({'message': '驗證成功，帳號已建立'}), 200
+
+
+@auth_bp.route('/resend-registration-code', methods=['POST'])
+def resend_registration_code():
+    """
+    重新發送註冊驗證碼
+    Body: { "pending_id": 123 }
+    """
+    data = request.get_json() or {}
+    pending_id = data.get('pending_id')
+    if not pending_id:
+        abort(400, message='pending_id 為必填')
+
+    pending = PendingRegistration.query.get(pending_id)
+    if not pending:
+        abort(404, message='找不到對應的驗證流程')
+
+    from datetime import timedelta
+    # simple rate limit: 每次重新產生新 code，最多每天 5 次
+    if pending.resend_count >= 5:
+        abort(429, message='已達今日重新寄信上限')
+
+    code = generate_numeric_code(6)
+    pending.verification_code_hash = hash_verification_code(code)
+    pending.code_expires_at = datetime.utcnow() + timedelta(minutes=15)
+    pending.resend_count = (pending.resend_count or 0) + 1
+    db.session.commit()
+
+    email_service.send_registration_code_email(
+        user_email=pending.email,
+        username=pending.username or pending.email,
+        code=code,
+        expires_minutes=15
+    )
+
+    return jsonify({'message': '驗證碼已重新發送'}), 200
+
+
 @auth_bp.route('/forgot-password', methods=['POST'])
 def forgot_password():
     """
@@ -323,7 +466,7 @@ def reset_password():
         abort(400, message='重置 token 無效或已過期')
     
     # 查找用戶
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
     
     if not user:
         abort(404, message='使用者不存在')
