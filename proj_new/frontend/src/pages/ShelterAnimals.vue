@@ -662,6 +662,33 @@
                     </div>
                     <div v-if="record.provider" class="text-gray-600">提供者: {{ record.provider }}</div>
                     <div v-if="record.details" class="text-gray-600">{{ record.details }}</div>
+                    
+                    <!-- 醫療記錄附件顯示 -->
+                    <div v-if="record.attachments && record.attachments.length > 0" class="mt-3 pt-3 border-t border-gray-100">
+                      <div class="text-xs font-medium text-gray-500 mb-2 flex items-center">
+                        <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                        </svg>
+                        醫療證明 ({{ record.attachments.length }})
+                      </div>
+                      <div class="grid grid-cols-1 gap-2">
+                        <a
+                          v-for="(attachment, attIndex) in record.attachments"
+                          :key="attIndex"
+                          :href="attachment.url"
+                          target="_blank"
+                          class="flex items-center p-2 bg-blue-50 hover:bg-blue-100 rounded border border-blue-200 transition-colors"
+                        >
+                          <svg class="w-4 h-4 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                          </svg>
+                          <span class="text-sm text-blue-700 truncate">{{ attachment.filename || attachment.name || '醫療證明文件' }}</span>
+                          <svg class="w-3 h-3 text-blue-500 ml-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                          </svg>
+                        </a>
+                      </div>
+                    </div>
                   </div>
                 </div>
                 
@@ -713,6 +740,37 @@
                       class="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
                     ></textarea>
                   </div>
+                  
+                  <!-- 醫療證明檔案上傳 -->
+                  <div>
+                    <label class="block text-xs text-gray-600 mb-1">醫療證明</label>
+                    <input
+                      ref="medicalFileInput"
+                      type="file"
+                      multiple
+                      accept=".pdf,.jpg,.jpeg,.png"
+                      @change="handleMedicalFileSelect"
+                      class="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                    <p class="text-xs text-gray-500 mt-1">支援 PDF、JPG、PNG 格式</p>
+                    
+                    <!-- 顯示選擇的檔案 -->
+                    <div v-if="selectedMedicalFiles.length > 0" class="mt-2 space-y-1">
+                      <div
+                        v-for="(file, index) in selectedMedicalFiles"
+                        :key="index"
+                        class="flex justify-between items-center p-2 bg-blue-50 rounded text-xs"
+                      >
+                        <span>📎 {{ file.name }}</span>
+                        <button
+                          @click="removeSelectedMedicalFile(index)"
+                          class="text-red-500 hover:text-red-700"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
+                  </div>
                   <button
                     @click="addMedicalRecord"
                     type="button"
@@ -736,6 +794,7 @@ import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { getShelterAnimals, batchUpdateAnimalStatus, getAnimalMedicalRecords, type ShelterAnimalsFilters } from '@/api/shelters'
 import type { Animal } from '@/api/animals'
+import { useUpload } from '@/composables/useUpload'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -758,6 +817,13 @@ const medicalRecords = ref<Array<{
   date: string
   provider: string
   details: string
+  attachments?: Array<{
+    url: string
+    filename?: string
+    name?: string
+    storage_key?: string
+    mime_type?: string
+  }>
 }>>([])
 
 const newMedicalRecord = reactive({
@@ -766,6 +832,10 @@ const newMedicalRecord = reactive({
   provider: '',
   details: ''
 })
+
+// 醫療證明檔案上傳相關
+const selectedMedicalFiles = ref<File[]>([])
+const medicalFileInput = ref<HTMLInputElement | null>(null)
 
 const editForm = reactive({
   name: '',
@@ -1480,7 +1550,8 @@ async function editAnimal(animal: Animal) {
         record_type: record.record_type || 'OTHER',
         date: record.date || '',
         provider: record.provider || '',
-        details: record.details || ''
+        details: record.details || '',
+        attachments: record.attachments || []
       }))
     } else {
       console.warn('醫療記錄格式不正確:', records)
@@ -1514,6 +1585,29 @@ function closeEditModal() {
     provider: '',
     details: ''
   })
+  // 重置醫療證明檔案選擇
+  selectedMedicalFiles.value = []
+  if (medicalFileInput.value) {
+    medicalFileInput.value.value = ''
+  }
+}
+
+// 醫療證明檔案處理
+function handleMedicalFileSelect(event: Event) {
+  const input = event.target as HTMLInputElement
+  if (input.files) {
+    selectedMedicalFiles.value = Array.from(input.files)
+  }
+}
+
+function removeSelectedMedicalFile(index: number) {
+  selectedMedicalFiles.value.splice(index, 1)
+  // 更新 input 的檔案列表
+  if (medicalFileInput.value) {
+    const dt = new DataTransfer()
+    selectedMedicalFiles.value.forEach(file => dt.items.add(file))
+    medicalFileInput.value.files = dt.files
+  }
 }
 
 // 醫療記錄管理
@@ -1554,14 +1648,43 @@ async function addMedicalRecord() {
   }
   
   try {
-    // 調用 API 創建醫療記錄
-    const { createMedicalRecord } = await import('@/api/medicalRecords')
-    const response = await createMedicalRecord(editingAnimal.value.animal_id, {
+    // 準備醫療記錄數據
+    let medicalData: any = {
       record_type: newMedicalRecord.record_type,
       date: newMedicalRecord.date,
       provider: newMedicalRecord.provider || '',
       details: newMedicalRecord.details || ''
-    })
+    }
+    
+    // 如果有選擇檔案，先上傳檔案
+    if (selectedMedicalFiles.value.length > 0) {
+      const { uploadMultiple } = useUpload()
+      
+      try {
+        const uploadResults = await uploadMultiple(
+          selectedMedicalFiles.value,
+          'MEDICAL_RECORD',
+          editingAnimal.value.animal_id
+        )
+        
+        // 將上傳結果轉換為附件格式
+        medicalData.attachments = uploadResults.map(result => ({
+          url: result.url,
+          storage_key: result.storage_key,
+          filename: result.filename,
+          mime_type: result.mime_type,
+          size: result.size
+        }))
+      } catch (uploadError) {
+        console.error('檔案上傳失敗:', uploadError)
+        alert('檔案上傳失敗，請重試')
+        return
+      }
+    }
+    
+    // 調用 API 創建醫療記錄
+    const { createMedicalRecord } = await import('@/api/medicalRecords')
+    const response = await createMedicalRecord(editingAnimal.value.animal_id, medicalData)
     
     // 添加到本地列表，包含從 API 返回的 ID
     medicalRecords.value.push({
@@ -1569,7 +1692,8 @@ async function addMedicalRecord() {
       record_type: newMedicalRecord.record_type,
       date: newMedicalRecord.date,
       provider: newMedicalRecord.provider,
-      details: newMedicalRecord.details
+      details: newMedicalRecord.details,
+      attachments: medicalData.attachments || []
     })
     
     // 重置表單
@@ -1579,6 +1703,12 @@ async function addMedicalRecord() {
       provider: '',
       details: ''
     })
+    
+    // 重置檔案選擇
+    selectedMedicalFiles.value = []
+    if (medicalFileInput.value) {
+      medicalFileInput.value.value = ''
+    }
     
     alert('✅ 醫療記錄已新增')
     
