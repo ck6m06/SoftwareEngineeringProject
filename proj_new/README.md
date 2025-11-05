@@ -441,4 +441,3 @@ UPDATE users SET deleted_at = NULL WHERE email = 'admin@test.com';
   - 前後端分離架構
   - Docker Compose 環境
   - 基礎認證系統
-  - test_1105
