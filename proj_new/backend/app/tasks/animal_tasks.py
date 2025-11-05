@@ -41,6 +41,7 @@ def process_animal_batch_import(self, job_id: int) -> Dict[str, Any]:
         shelter_id = job.payload.get('shelter_id')
         animal_csv_content = job.payload.get('animal_csv_content')
         medical_csv_content = job.payload.get('medical_csv_content')
+        medical_proof_data = job.payload.get('medical_proofs', [])
         photos_data = job.payload.get('photos', [])
         options = job.payload.get('options', {})
         
@@ -63,6 +64,8 @@ def process_animal_batch_import(self, job_id: int) -> Dict[str, Any]:
             'failed_animals': 0,
             'total_medical_records': 0,
             'success_medical_records': 0,
+            'total_medical_proofs': 0,
+            'success_medical_proofs': 0,
             'total_photos': 0,
             'success_photos': 0,
             'errors': []
@@ -270,6 +273,8 @@ def process_animal_batch_import(self, job_id: int) -> Dict[str, Any]:
         db.session.commit()
         
         # === 第二階段: 解析醫療記錄 CSV (選填) ===
+        medical_record_map = {}  # {(animal_code, record_sequence): medical_record_id}
+        
         if medical_csv_content:
             medical_csv_reader = csv.DictReader(io.StringIO(medical_csv_content))
             
@@ -296,6 +301,14 @@ def process_animal_batch_import(self, job_id: int) -> Dict[str, Any]:
                     record_type = row['record_type'].strip().upper()
                     if record_type not in ['TREATMENT', 'CHECKUP', 'VACCINE', 'SURGERY', 'OTHER']:
                         raise ValueError(f'Invalid record_type: {record_type}')
+                    
+                    # 取得 record_sequence (選填,預設為1)
+                    record_sequence = 1
+                    if 'record_sequence' in row and row['record_sequence'].strip():
+                        try:
+                            record_sequence = int(row['record_sequence'].strip())
+                        except ValueError:
+                            raise ValueError(f'Invalid record_sequence: {row["record_sequence"]}. Must be a number')
                     
                     # 處理醫療日期 - 支援多種格式
                     try:
@@ -332,6 +345,11 @@ def process_animal_batch_import(self, job_id: int) -> Dict[str, Any]:
                     )
                     
                     db.session.add(medical_record)
+                    db.session.flush()  # 獲取 medical_record_id
+                    
+                    # 記錄醫療記錄映射 (用於證明文件關聯)
+                    medical_record_map[(animal_code, record_sequence)] = medical_record.medical_record_id
+                    
                     stats['success_medical_records'] += 1
                     
                 except Exception as e:
@@ -345,6 +363,56 @@ def process_animal_batch_import(self, job_id: int) -> Dict[str, Any]:
             # Commit 醫療記錄
             db.session.commit()
         
+        # === 第三階段: 處理醫療證明文件 (選填) ===
+        if medical_proof_data:
+            # 處理醫療證明文件
+            for proof in medical_proof_data:
+                stats['total_medical_proofs'] += 1
+                
+                try:
+                    animal_code = proof['animal_code']
+                    record_sequence = proof['record_sequence']
+                    
+                    # 檢查動物是否存在
+                    if animal_code not in animal_code_map:
+                        raise ValueError(f'動物編號 {animal_code} 不存在於動物基本資訊 CSV 中')
+                    
+                    animal_id = animal_code_map[animal_code]
+                    
+                    # 嘗試找到對應的醫療記錄
+                    medical_record_id = medical_record_map.get((animal_code, record_sequence))
+                    
+                    # 創建醫療證明附件記錄
+                    from app.models.others import Attachment
+                    
+                    attachment = Attachment(
+                        owner_type='medical_record' if medical_record_id else 'animal',
+                        owner_id=medical_record_id or animal_id,  # 關聯到醫療記錄或動物
+                        filename=proof['filename'],
+                        storage_key=proof['storage_key'],
+                        url=proof['url'],
+                        mime_type=proof['content_type'],
+                        size=proof['size'],
+                        meta_data={
+                            'animal_code': animal_code,
+                            'record_sequence': record_sequence,
+                            'type': 'medical_proof'
+                        }
+                    )
+                    
+                    db.session.add(attachment)
+                    stats['success_medical_proofs'] += 1
+                    
+                except Exception as e:
+                    stats['errors'].append({
+                        'file': 'medical_proof',
+                        'filename': proof.get('filename', 'unknown'),
+                        'error': str(e)
+                    })
+            
+            # Commit 醫療證明附件
+            db.session.commit()
+
         # === 第四階段: 處理照片 (選填) ===
         if photos_data:
             # 所有照片已通過預驗證，開始處理
@@ -404,8 +472,14 @@ def process_animal_batch_import(self, job_id: int) -> Dict[str, Any]:
         
         # 判斷任務整體結果狀態
         has_critical_errors = stats['failed_animals'] > 0  # 動物匯入失敗是關鍵錯誤
-        has_minor_errors = stats['total_photos'] > 0 and stats['success_photos'] == 0  # 照片全部失敗
-        has_partial_photo_errors = stats['total_photos'] > stats['success_photos'] > 0  # 部分照片失敗
+        has_minor_errors = (
+            (stats['total_photos'] > 0 and stats['success_photos'] == 0) or  # 照片全部失敗
+            (stats['total_medical_proofs'] > 0 and stats['success_medical_proofs'] == 0)  # 醫療證明全部失敗
+        )
+        has_partial_errors = (
+            (stats['total_photos'] > stats['success_photos'] > 0) or  # 部分照片失敗
+            (stats['total_medical_proofs'] > stats['success_medical_proofs'] > 0)  # 部分醫療證明失敗
+        )
         
         # 決定任務狀態和結果信息
         if has_critical_errors:
@@ -414,15 +488,29 @@ def process_animal_batch_import(self, job_id: int) -> Dict[str, Any]:
             overall_result = 'failed'
             result_message = f'動物匯入失敗：{stats["failed_animals"]}/{stats["total_animals"]} 失敗'
         elif has_minor_errors:
-            # 所有照片匯入失敗 - 標記為失敗
+            # 所有附件匯入失敗 - 標記為失敗
             job.status = JobStatus.FAILED 
             overall_result = 'partial_failed'
-            result_message = f'照片匯入完全失敗：0/{stats["total_photos"]} 成功'
-        elif has_partial_photo_errors:
-            # 部分照片失敗 - 標記為成功但含警告
+            
+            failed_types = []
+            if stats['total_photos'] > 0 and stats['success_photos'] == 0:
+                failed_types.append('照片')
+            if stats['total_medical_proofs'] > 0 and stats['success_medical_proofs'] == 0:
+                failed_types.append('醫療證明')
+            
+            result_message = f'{"/".join(failed_types)}匯入完全失敗'
+        elif has_partial_errors:
+            # 部分附件失敗 - 標記為成功但含警告
             job.status = JobStatus.SUCCEEDED
             overall_result = 'partial_success'
-            result_message = f'部分成功：照片 {stats["success_photos"]}/{stats["total_photos"]} 成功'
+            
+            partial_types = []
+            if stats['total_photos'] > stats['success_photos'] > 0:
+                partial_types.append(f'照片 {stats["success_photos"]}/{stats["total_photos"]}')
+            if stats['total_medical_proofs'] > stats['success_medical_proofs'] > 0:
+                partial_types.append(f'醫療證明 {stats["success_medical_proofs"]}/{stats["total_medical_proofs"]}')
+            
+            result_message = f'部分成功：{", ".join(partial_types)} 成功'
         else:
             # 完全成功
             job.status = JobStatus.SUCCEEDED
@@ -442,6 +530,10 @@ def process_animal_batch_import(self, job_id: int) -> Dict[str, Any]:
             'medical_records': {
                 'total': stats['total_medical_records'],
                 'success': stats['success_medical_records']
+            },
+            'medical_proofs': {
+                'total': stats['total_medical_proofs'],
+                'success': stats['success_medical_proofs']
             },
             'photos': {
                 'total': stats['total_photos'],

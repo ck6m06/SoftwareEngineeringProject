@@ -117,6 +117,7 @@ class Attachment(db.Model):
     filename = db.Column(db.String(1024), nullable=True)
     mime_type = db.Column(db.String(128), nullable=True)
     size = db.Column(db.Integer, nullable=True)
+    meta_data = db.Column(db.JSON, nullable=True)  # 添加 meta_data 欄位用於額外資訊
     created_by = db.Column(db.BigInteger, db.ForeignKey('users.user_id'), nullable=True)
     created_at = db.Column(db.DateTime(6), default=datetime.utcnow, nullable=False)
     deleted_at = db.Column(db.DateTime(6), nullable=True)
@@ -138,6 +139,7 @@ class Attachment(db.Model):
             'filename': self.filename,
             'mime_type': self.mime_type,
             'size': self.size,
+            'meta_data': self.meta_data,
             'created_by': self.created_by,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }

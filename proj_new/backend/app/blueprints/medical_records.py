@@ -9,8 +9,56 @@ from app import db
 from app.models.medical_record import MedicalRecord, RecordType
 from app.models.animal import Animal
 from app.models.user import User, UserRole
+from sqlalchemy import or_
 
 medical_records_bp = Blueprint('medical_records', __name__, description='醫療紀錄 API')
+
+
+@medical_records_bp.route('/animals', methods=['GET'])
+@jwt_required()
+def list_animals_for_medical_records():
+    """
+    獲取當前用戶有權限管理醫療紀錄的動物列表
+    """
+    current_user_id = int(get_jwt_identity())
+    user = User.query.get(current_user_id)
+    
+    if not user:
+        abort(404, message='用戶不存在')
+    
+    # 基本查詢：排除已刪除的動物
+    query = Animal.query.filter_by(deleted_at=None)
+    
+    if user.role == UserRole.ADMIN:
+        # 管理員可以看到所有動物
+        pass
+    elif user.role == UserRole.SHELTER_MEMBER:
+        # 收容所成員可以看到：
+        # 1. 自己擁有的動物 (個人送養)
+        # 2. 所屬收容所的動物
+        conditions = [Animal.owner_id == current_user_id]
+        if user.primary_shelter_id:
+            conditions.append(Animal.shelter_id == user.primary_shelter_id)
+        query = query.filter(or_(*conditions))
+    else:
+        # 一般用戶只能看到自己的動物
+        query = query.filter_by(owner_id=current_user_id)
+    
+    # 執行查詢並序列化
+    animals = query.all()
+    animals_data = []
+    
+    for animal in animals:
+        animal_dict = animal.to_dict()
+        # 添加圖片信息
+        if hasattr(animal, 'images') and animal.images:
+            animal_dict['images'] = [img.to_dict() for img in animal.images]
+        animals_data.append(animal_dict)
+    
+    return jsonify({
+        'animals': animals_data,
+        'total': len(animals_data)
+    })
 
 
 @medical_records_bp.route('/animals/<int:animal_id>/medical-records', methods=['POST'])
@@ -32,8 +80,8 @@ def create_medical_record(animal_id):
     if not user:
         abort(404, message='用戶不存在')
     
-    # 權限檢查邏輯:
-    # 1. 管理員可以為任何動物創建醫療紀錄
+    # 權限檢查:
+    # 1. 管理員可以為所有動物創建醫療紀錄
     # 2. 動物擁有者(owner_id)可以為自己的動物創建醫療紀錄
     # 3. 收容所成員可以為所屬收容所的動物創建醫療紀錄
     has_permission = False
@@ -92,6 +140,32 @@ def create_medical_record(animal_id):
     )
     
     db.session.add(medical_record)
+    db.session.flush()  # 獲取醫療記錄 ID，但不提交事務
+    
+    # 處理附件：如果有附件，創建 Attachment 記錄
+    attachments_data = data.get('attachments', [])
+    if attachments_data and isinstance(attachments_data, list):
+        from app.models.others import Attachment
+        
+        for attachment_info in attachments_data:
+            if isinstance(attachment_info, dict) and 'storage_key' in attachment_info:
+                # 創建 Attachment 記錄
+                attachment = Attachment(
+                    owner_type='medical_record',
+                    owner_id=medical_record.medical_record_id,
+                    filename=attachment_info.get('filename', '未知檔案'),
+                    storage_key=attachment_info.get('storage_key'),
+                    url=attachment_info.get('url'),
+                    mime_type=attachment_info.get('mime_type'),
+                    size=attachment_info.get('size'),
+                    meta_data={
+                        'type': 'user_uploaded',
+                        'uploaded_via': 'medical_record_form'
+                    },
+                    created_by=current_user_id
+                )
+                db.session.add(attachment)
+    
     db.session.commit()
     
     return jsonify({
@@ -122,7 +196,7 @@ def list_medical_records(animal_id):
     }), 200
 
 
-@medical_records_bp.route('/medical-records/<int:record_id>', methods=['PATCH'])
+@medical_records_bp.route('/<int:record_id>', methods=['PATCH'])
 @jwt_required()
 def update_medical_record(record_id):
     """
@@ -147,14 +221,18 @@ def update_medical_record(record_id):
     # 獲取動物資料以檢查擁有者
     animal = Animal.query.get(record.animal_id)
     
-    # 權限檢查: 管理員、醫療紀錄創建者、動物擁有者、或收容所成員可更新
+    # 權限檢查: 醫療紀錄創建者、動物擁有者、或收容所成員可更新
+    # 管理員不能直接編輯醫療記錄，只能查看和驗證
     has_permission = False
     
+    # 管理員不能直接編輯醫療記錄（保護醫療記錄的專業性和完整性）
     if user.role == UserRole.ADMIN:
-        has_permission = True
+        has_permission = False
     elif record.created_by == current_user_id:
-        # 醫療紀錄創建者可更新
-        has_permission = True
+        # 醫療紀錄創建者可更新（限時24小時）
+        from datetime import datetime, timedelta
+        if record.created_at and datetime.utcnow() - record.created_at <= timedelta(hours=24):
+            has_permission = True
     elif animal and animal.owner_id and animal.owner_id == current_user_id:
         # 個人送養動物：動物擁有者可更新
         has_permission = True
@@ -163,7 +241,10 @@ def update_medical_record(record_id):
         has_permission = True
     
     if not has_permission:
-        abort(403, message='僅創建者、動物擁有者、收容所成員或管理員可更新醫療紀錄')
+        if user.role == UserRole.ADMIN:
+            abort(403, message='管理員無法直接編輯醫療記錄，請使用"標記需要修正"功能通知相關人員')
+        else:
+            abort(403, message='僅創建者(24小時內)、動物擁有者或收容所成員可更新醫療紀錄')
     
     data = request.get_json()
     
@@ -201,7 +282,39 @@ def update_medical_record(record_id):
         record.details = data['details']
     
     if 'attachments' in data:
-        record.attachments = data['attachments']
+        # 更新 JSON 附件數據
+        new_attachments = data['attachments']
+        existing_attachments = record.attachments or []
+        
+        # 處理新附件：如果有新的附件需要創建 Attachment 記錄
+        if new_attachments and isinstance(new_attachments, list):
+            from app.models.others import Attachment
+            
+            # 檢查哪些是新附件（沒有 attachment_id 的）
+            for attachment_info in new_attachments:
+                if (isinstance(attachment_info, dict) and 
+                    'storage_key' in attachment_info and 
+                    not attachment_info.get('attachment_id')):
+                    
+                    # 這是新附件，創建 Attachment 記錄
+                    attachment = Attachment(
+                        owner_type='medical_record',
+                        owner_id=record.medical_record_id,
+                        filename=attachment_info.get('filename', '未知檔案'),
+                        storage_key=attachment_info.get('storage_key'),
+                        url=attachment_info.get('url'),
+                        mime_type=attachment_info.get('mime_type'),
+                        size=attachment_info.get('size'),
+                        meta_data={
+                            'type': 'user_uploaded',
+                            'uploaded_via': 'medical_record_form_update'
+                        },
+                        created_by=current_user_id
+                    )
+                    db.session.add(attachment)
+        
+        # 更新 JSON 欄位（保留向後兼容性）
+        record.attachments = new_attachments
     
     record.updated_at = datetime.utcnow()
     db.session.commit()
@@ -212,7 +325,7 @@ def update_medical_record(record_id):
     }), 200
 
 
-@medical_records_bp.route('/medical-records/<int:record_id>/verify', methods=['POST'])
+@medical_records_bp.route('/<int:record_id>/verify', methods=['POST'])
 @jwt_required()
 def verify_medical_record(record_id):
     """

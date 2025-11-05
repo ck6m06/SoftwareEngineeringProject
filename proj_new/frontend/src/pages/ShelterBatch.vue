@@ -32,10 +32,11 @@
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             <div class="flex-1">
-              <p class="text-sm font-semibold text-blue-900 mb-2">批次匯入支援三種檔案類型:</p>
+              <p class="text-sm font-semibold text-blue-900 mb-2">批次匯入支援四種檔案類型:</p>
               <ul class="text-xs text-blue-800 space-y-1 list-disc list-inside">
                 <li><strong>動物基本資訊 CSV (必填):</strong> 包含名稱、物種、品種等基本資訊</li>
                 <li><strong>醫療記錄 CSV (選填):</strong> 包含多筆醫療記錄,透過動物編號關聯</li>
+                <li><strong>醫療證明文件 (選填):</strong> 檔名格式: 動物編號_醫療記錄編號.pdf (例: 001_1.pdf, 001_2.pdf)</li>
                 <li><strong>照片資料夾 (選填):</strong> 照片檔名格式: 動物編號_順序.jpg (例: 001_1.jpg, 001_2.jpg)</li>
               </ul>
             </div>
@@ -75,11 +76,13 @@
                 </ul>
                 <p><strong>醫療記錄 CSV 欄位說明:</strong></p>
                 <ul class="list-disc list-inside ml-2">
-                  <li><strong>必填:</strong> animal_code, record_type, date</li>
+                  <li><strong>必填:</strong> animal_code, record_type, date, record_sequence</li>
                   <li><strong>animal_code:</strong> 對應動物基本資訊的編號</li>
                   <li><strong>record_type:</strong> TREATMENT, CHECKUP, VACCINE, SURGERY, OTHER</li>
+                  <li><strong>record_sequence:</strong> 醫療記錄序號(用於關聯證明文件,例: 1, 2, 3)</li>
                   <li><strong>date:</strong> 醫療日期，支援多種格式：YYYY-MM-DD、YYYY/MM/DD、DD/MM/YYYY、DD-MM-YYYY</li>
                   <li><strong>選填:</strong> provider, details</li>
+                  <li><strong>證明文件:</strong> 可上傳對應的PDF證明，檔名格式: 動物編號_記錄序號.pdf</li>
                 </ul>
               </div>
             </div>
@@ -168,6 +171,58 @@
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 醫療證明文件 (選填) -->
+        <div class="mb-6">
+          <label class="block text-sm font-medium text-gray-700 mb-2">醫療證明文件 (選填)</label>
+          <div class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-orange-400 transition">
+            <input
+              type="file"
+              ref="medicalProofInput"
+              @change="handleMedicalProofSelect"
+              accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+              multiple
+              class="hidden"
+            />
+            <button
+              @click="medicalProofInput?.click()"
+              class="inline-flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition"
+              :disabled="isUploading"
+            >
+              <svg class="h-5 w-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              選擇醫療證明文件
+            </button>
+            <p class="text-sm text-gray-500 mt-2">選填: 檔名格式 動物編號_記錄序號.pdf (例: 001_1.pdf)</p>
+            <p class="text-xs text-gray-400 mt-1">支援格式: PDF, DOC, DOCX, JPG, PNG</p>
+          </div>
+
+          <div v-if="medicalProofFiles.length > 0" class="mt-3 bg-orange-50 border border-orange-200 rounded-lg p-3">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-sm font-medium text-gray-900">已選擇 {{ medicalProofFiles.length }} 個醫療證明文件</span>
+              <button @click="clearMedicalProof" class="text-red-600 hover:text-red-700 text-sm" :disabled="isUploading">
+                清除全部
+              </button>
+            </div>
+            <div class="max-h-32 overflow-y-auto space-y-1">
+              <div v-for="(file, index) in medicalProofFiles" :key="index" class="flex items-center justify-between bg-white rounded p-2">
+                <div class="flex items-center gap-2">
+                  <svg class="h-4 w-4 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  <span class="text-sm text-gray-900">{{ file.name }}</span>
+                  <span class="text-xs text-gray-500">({{ formatFileSize(file.size) }})</span>
+                </div>
+                <button @click="removeMedicalProofFile(index)" class="text-red-600 hover:text-red-700" :disabled="isUploading">
+                  <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -329,6 +384,18 @@
                     <p class="text-gray-600">總計: {{ job.result_summary.medical_records.total }} 筆</p>
                     <p class="text-green-600">成功: {{ job.result_summary.medical_records.success }} 筆</p>
                   </div>
+
+                  <!-- 醫療證明文件結果 -->
+                  <div v-if="job.result_summary.medical_proofs && job.result_summary.medical_proofs.total > 0" class="bg-white rounded p-2">
+                    <p class="font-medium text-gray-800">醫療證明文件</p>
+                    <p class="text-gray-600">總計: {{ job.result_summary.medical_proofs.total }} 個</p>
+                    <p :class="job.result_summary.medical_proofs.success > 0 ? 'text-green-600' : 'text-gray-500'">
+                      成功: {{ job.result_summary.medical_proofs.success }} 個
+                    </p>
+                    <p v-if="job.result_summary.medical_proofs.total - job.result_summary.medical_proofs.success > 0" class="text-red-600">
+                      失敗: {{ job.result_summary.medical_proofs.total - job.result_summary.medical_proofs.success }} 個
+                    </p>
+                  </div>
                 </div>
 
                 <!-- 錯誤詳情 -->
@@ -398,11 +465,13 @@ const authStore = useAuthStore()
 // 檔案輸入 refs
 const animalCsvInput = ref<HTMLInputElement>()
 const medicalCsvInput = ref<HTMLInputElement>()
+const medicalProofInput = ref<HTMLInputElement>()
 const photosInput = ref<HTMLInputElement>()
 
 // 檔案狀態
 const animalCsvFile = ref<File | null>(null)
 const medicalCsvFile = ref<File | null>(null)
+const medicalProofFiles = ref<File[]>([])
 const photoFiles = ref<File[]>([])
 
 const isUploading = ref(false)
@@ -470,6 +539,59 @@ function clearMedicalCsv() {
   }
 }
 
+// ===== 醫療證明文件選擇 =====
+function handleMedicalProofSelect(event: Event) {
+  const target = event.target as HTMLInputElement
+  if (target.files && target.files.length > 0) {
+    const files = Array.from(target.files)
+    
+    // 驗證檔案類型
+    const allowedTypes = [
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'image/jpeg',
+      'image/jpg', 
+      'image/png'
+    ]
+    
+    const invalidFiles = files.filter(f => !allowedTypes.includes(f.type))
+    if (invalidFiles.length > 0) {
+      errorMessage.value = `有 ${invalidFiles.length} 個檔案格式不支援。支援格式: PDF, DOC, DOCX, JPG, PNG`
+      return
+    }
+    
+    // 驗證檔案大小 (每個檔案最大10MB)
+    const oversizeFiles = files.filter(f => f.size > 10 * 1024 * 1024)
+    if (oversizeFiles.length > 0) {
+      errorMessage.value = `有 ${oversizeFiles.length} 個檔案超過 10MB`
+      return
+    }
+    
+    // 驗證檔案命名格式 (animal_code_record_sequence.ext)
+    const filenamePattern = /^(.+?)_(\d+)\.(pdf|doc|docx|jpg|jpeg|png)$/i
+    const invalidNameFiles = files.filter(f => !filenamePattern.test(f.name))
+    if (invalidNameFiles.length > 0) {
+      errorMessage.value = `有 ${invalidNameFiles.length} 個檔案命名格式錯誤。正確格式: 動物編號_記錄序號.副檔名 (例: 001_1.pdf)`
+      return
+    }
+    
+    medicalProofFiles.value = [...medicalProofFiles.value, ...files]
+    errorMessage.value = ''
+  }
+}
+
+function clearMedicalProof() {
+  medicalProofFiles.value = []
+  if (medicalProofInput.value) {
+    medicalProofInput.value.value = ''
+  }
+}
+
+function removeMedicalProofFile(index: number) {
+  medicalProofFiles.value.splice(index, 1)
+}
+
 // ===== 照片選擇 =====
 function handlePhotosSelect(event: Event) {
   const target = event.target as HTMLInputElement
@@ -526,6 +648,7 @@ async function uploadBatch() {
     console.log('[DEBUG] animalCsvFile:', animalCsvFile.value)
     console.log('[DEBUG] animalCsvFile type:', animalCsvFile.value?.constructor.name)
     console.log('[DEBUG] medicalCsvFile:', medicalCsvFile.value)
+    console.log('[DEBUG] medicalProofFiles count:', medicalProofFiles.value.length)
     console.log('[DEBUG] photoFiles count:', photoFiles.value.length)
     
     // 使用 FormData 上傳多個檔案
@@ -535,6 +658,11 @@ async function uploadBatch() {
     if (medicalCsvFile.value) {
       formData.append('medical_csv', medicalCsvFile.value)
     }
+    
+    // 上傳醫療證明文件
+    medicalProofFiles.value.forEach((file) => {
+      formData.append('medical_proofs', file)
+    })
     
     // 上傳所有照片
     photoFiles.value.forEach((file) => {
@@ -547,29 +675,77 @@ async function uploadBatch() {
       console.log(`  ${pair[0]}:`, pair[1])
     }
     
+    console.log('[DEBUG] About to send request to:', `/shelters/${authStore.user.primary_shelter_id}/animals/batch`)
+    console.log('[DEBUG] Request will use Authorization:', authStore.accessToken ? 'Yes' : 'No')
+    
     // FormData 會被 interceptor 自動處理,移除預設的 Content-Type
     const response = await api.post(
       `/shelters/${authStore.user.primary_shelter_id}/animals/batch`,
       formData
     )
     
+    console.log('[DEBUG] Upload response:', response.data)
+    
         alert(`批次匯入已加入隊列!\n任務 ID: ${response.data.job_id}\n\n請等待處理完成，如果成功將自動跳轉到動物管理頁面`)
         
         // 清空所有檔案選擇
         clearAnimalCsv()
         clearMedicalCsv()
+        clearMedicalProof()
         clearPhotos()
         
         // 重新載入任務列表
         await loadJobs()
         
         // 監控任務狀態，只有在成功時才跳轉
-        monitorJobCompletion(response.data.job_id)  } catch (err: any) {
+        monitorJobCompletion(response.data.job_id)
+        
+  } catch (err: any) {
     console.error('Upload error:', err)
     console.error('Error response:', err.response?.data)
     console.error('Error status:', err.response?.status)
     console.error('Error message:', err.response?.data?.message)
-    errorMessage.value = err.response?.data?.message || '上傳失敗,請稍後再試'
+    console.error('Error headers:', err.response?.headers)
+    console.error('Error config:', err.config)
+    
+    // 構建詳細的錯誤訊息
+    let detailedError = '上傳失敗：'
+    
+    if (err.response?.data?.message) {
+      detailedError += err.response.data.message
+    } else if (err.response?.status) {
+      detailedError += `伺服器錯誤 (${err.response.status})`
+      if (err.response.status === 400) {
+        detailedError += ' - 請檢查檔案格式和內容'
+      } else if (err.response.status === 401) {
+        detailedError += ' - 登入已過期，請重新登入'
+      } else if (err.response.status === 403) {
+        detailedError += ' - 權限不足，請確認您是收容所會員'
+      } else if (err.response.status === 413) {
+        detailedError += ' - 檔案太大，請檢查檔案大小限制'
+      } else if (err.response.status === 500) {
+        detailedError += ' - 伺服器內部錯誤，請稍後再試'
+      }
+      
+      // 添加具體的錯誤信息
+      if (err.response?.data) {
+        detailedError += `\n回應內容: ${JSON.stringify(err.response.data)}`
+      }
+    } else if (err.message) {
+      detailedError += err.message
+    } else {
+      detailedError += '未知錯誤，請檢查網路連線和檔案格式'
+    }
+    
+    // 如果有具體的錯誤詳情，添加到錯誤訊息中
+    if (err.response?.data?.details) {
+      detailedError += `\n詳細資訊：${err.response.data.details}`
+    }
+    
+    // 顯示完整的錯誤信息供調試
+    console.log('Final error message:', detailedError)
+    
+    errorMessage.value = detailedError
   } finally {
     isUploading.value = false
   }
@@ -653,12 +829,12 @@ function downloadAnimalTemplate() {
 }
 
 function downloadMedicalTemplate() {
-  const csvContent = `animal_code,record_type,date,provider,details
-001,VACCINE,2024-09-15,City Animal Hospital,Rabies vaccination completed
-001,SURGERY,2024/03/10,Love & Care Veterinary,Neutering surgery recovery excellent
-002,CHECKUP,01/10/2024,Pet Health Center,Annual health check normal no abnormalities
-003,VACCINE,20-08-2024,Animal Shelter Clinic,Three-in-one vaccine administered
-003,TREATMENT,2024-07-15,Animal Hospital,Skin treatment fully recovered`
+  const csvContent = `animal_code,record_type,date,record_sequence,provider,details
+001,VACCINE,2024-09-15,1,City Animal Hospital,Rabies vaccination completed
+001,SURGERY,2024/03/10,2,Love & Care Veterinary,Neutering surgery recovery excellent
+002,CHECKUP,01/10/2024,1,Pet Health Center,Annual health check normal no abnormalities
+003,VACCINE,20-08-2024,1,Animal Shelter Clinic,Three-in-one vaccine administered
+003,TREATMENT,2024-07-15,2,Animal Hospital,Skin treatment fully recovered`
   
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
   const link = document.createElement('a')

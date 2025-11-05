@@ -259,6 +259,7 @@ def batch_upload_animals(shelter_id):
     接收多個檔案:
     - animal_csv: 動物基本資訊 CSV (必填)
     - medical_csv: 醫療記錄 CSV (選填)
+    - medical_proofs[]: 醫療證明文件 (選填,檔名格式: {animal_code}_{record_sequence}.pdf)
     - photos[]: 動物照片 (選填,檔名格式: {animal_code}_{order}.jpg)
     返回 202 Accepted + jobId
     """
@@ -334,6 +335,82 @@ def batch_upload_animals(shelter_id):
             except UnicodeDecodeError:
                 abort(400, message='醫療記錄 CSV 編碼錯誤,請使用 UTF-8 編碼')
     
+    # === 處理醫療證明文件 (選填) ===
+    medical_proof_data = []
+    if 'medical_proofs' in request.files:
+        medical_proofs = request.files.getlist('medical_proofs')
+        
+        # 導入 MinIO 客戶端
+        from app.blueprints.uploads import minio_client, minio_available
+        from config import Config
+        import uuid as uuid_lib
+        
+        if not minio_available:
+            abort(500, message='MinIO 服務不可用')
+        
+        for proof in medical_proofs:
+            if proof.filename and proof.filename != '':
+                # 驗證檔案類型 (PDF, DOC, DOCX, 圖片)
+                allowed_types = [
+                    'application/pdf',
+                    'application/msword', 
+                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                    'image/jpeg', 'image/jpg', 'image/png'
+                ]
+                
+                if not proof.content_type or proof.content_type not in allowed_types:
+                    abort(400, message=f'醫療證明文件 {proof.filename} 格式不支援。支援格式: PDF, DOC, DOCX, JPG, PNG')
+                
+                # 驗證檔案大小 (最大 10MB per file)
+                proof.seek(0, 2)
+                proof_size = proof.tell()
+                proof.seek(0)
+                
+                if proof_size > 10 * 1024 * 1024:
+                    abort(400, message=f'醫療證明文件 {proof.filename} 超過 10MB 限制')
+                
+                # 驗證檔名格式: animal_code_record_sequence.ext
+                import re
+                filename_pattern = re.compile(r'^(.+?)_(\d+)\.(pdf|doc|docx|jpg|jpeg|png)$', re.IGNORECASE)
+                match = filename_pattern.match(proof.filename)
+                
+                if not match:
+                    abort(400, message=f'醫療證明文件 {proof.filename} 檔名格式錯誤。正確格式: 動物編號_記錄序號.副檔名 (例: 001_1.pdf)')
+                
+                animal_code = match.group(1)
+                record_sequence = int(match.group(2))
+                
+                # 上傳到 MinIO
+                try:
+                    # 生成唯一的 object key
+                    ext = proof.filename.split('.')[-1] if '.' in proof.filename else 'pdf'
+                    object_key = f"medical-proofs/{shelter_id}/{uuid_lib.uuid4()}.{ext}"
+                    
+                    # 上傳到 MinIO
+                    minio_client.put_object(
+                        bucket_name=Config.MINIO_BUCKET,
+                        object_name=object_key,
+                        data=proof,
+                        length=proof_size,
+                        content_type=proof.content_type
+                    )
+                    
+                    # 生成公開 URL
+                    proof_url = f"http://{Config.MINIO_EXTERNAL_ENDPOINT or 'localhost:9000'}/{Config.MINIO_BUCKET}/{object_key}"
+                    
+                    medical_proof_data.append({
+                        'filename': proof.filename,
+                        'content_type': proof.content_type,
+                        'storage_key': object_key,
+                        'url': proof_url,
+                        'size': proof_size,
+                        'animal_code': animal_code,
+                        'record_sequence': record_sequence
+                    })
+                except Exception as e:
+                    db.session.rollback()
+                    abort(400, message=f'上傳醫療證明文件 {proof.filename} 到 MinIO 失敗: {str(e)}')
+
     # === 處理照片 (選填) ===
     photos_data = []
     if 'photos' in request.files:
@@ -407,6 +484,7 @@ def batch_upload_animals(shelter_id):
                 'shelter_id': shelter_id,
                 'animal_csv_content': animal_csv_content,
                 'medical_csv_content': medical_csv_content,
+                'medical_proofs': medical_proof_data,
                 'photos': photos_data,
                 'animal_csv_filename': animal_csv.filename,
                 'medical_csv_filename': medical_csv_filename,
@@ -428,6 +506,7 @@ def batch_upload_animals(shelter_id):
             'files_received': {
                 'animal_csv': animal_csv.filename,
                 'medical_csv': medical_csv_filename,
+                'medical_proofs_count': len(medical_proof_data),
                 'photos_count': len(photos_data)
             }
         }), 202

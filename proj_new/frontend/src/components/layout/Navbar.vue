@@ -126,6 +126,14 @@
                 我的申請
               </router-link>
               <router-link
+                to="/medical-records"
+                class="text-gray-700 hover:text-blue-600 transition"
+                active-class="text-blue-600 font-semibold"
+                title="管理我的動物的醫療記錄"
+              >
+                醫療記錄
+              </router-link>
+              <router-link
                 to="/applications"
                 class="text-gray-700 hover:text-blue-600 transition"
                 active-class="text-blue-600 font-semibold"
@@ -375,6 +383,13 @@
               @click="showMobileMenu = false"
             >
               我的申請
+            </router-link>
+            <router-link
+              to="/medical-records"
+              class="block px-3 py-2 rounded-md text-gray-700 hover:bg-gray-100"
+              @click="showMobileMenu = false"
+            >
+              🏥 醫療記錄
             </router-link>
             <router-link
               to="/applications"

@@ -2,7 +2,7 @@
  * Medical Records API Service
  */
 import api from './client'
-import type { MedicalRecord } from '@/types/models'
+import type { MedicalRecord, Animal } from '@/types/models'
 
 export interface CreateMedicalRecordData {
   record_type?: 'TREATMENT' | 'CHECKUP' | 'VACCINE' | 'SURGERY' | 'OTHER'
@@ -15,6 +15,19 @@ export interface CreateMedicalRecordData {
 export interface MedicalRecordsResponse {
   total: number
   medical_records: MedicalRecord[]
+}
+
+export interface AnimalsForMedicalRecordsResponse {
+  animals: Animal[]
+  total: number
+}
+
+/**
+ * 取得當前用戶有權限管理醫療紀錄的動物列表
+ */
+export async function getAnimalsForMedicalRecords() {
+  const response = await api.get<AnimalsForMedicalRecordsResponse>('/medical-records/animals')
+  return response.data
 }
 
 /**

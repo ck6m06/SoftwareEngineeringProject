@@ -253,7 +253,7 @@
                         <svg v-else class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                         </svg>
-                        <span class="text-sm">{{ attachment.name || `附件 ${idx + 1}` }}</span>
+                        <span class="text-sm">{{ attachment.filename || attachment.name || `附件 ${idx + 1}` }}</span>
                       </a>
                     </div>
                   </div>
@@ -472,7 +472,7 @@
                   class="attachment-item"
                 >
                   <a :href="attachment.url" target="_blank" class="text-blue-600 hover:underline text-sm">
-                    📎 {{ attachment.name || `附件 ${index + 1}` }}
+                    📎 {{ attachment.filename || attachment.name || `附件 ${index + 1}` }}
                   </a>
                   <button 
                     type="button" 
@@ -987,7 +987,7 @@ async function handleSubmit() {
             uploadedAttachments = uploadResults.map(result => ({
               url: result.url,
               storage_key: result.storage_key,
-              name: result.filename,
+              filename: result.filename,
               mime_type: result.mime_type,
               size: result.size
             }))
@@ -1225,7 +1225,7 @@ async function handleMedicalSubmit() {
         uploadedAttachments = uploadResults.map(result => ({
           url: result.url,
           storage_key: result.storage_key,
-          name: result.filename,
+          filename: result.filename,
           mime_type: result.mime_type,
           size: result.size
         }))
