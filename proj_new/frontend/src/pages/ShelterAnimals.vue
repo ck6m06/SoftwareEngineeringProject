@@ -581,8 +581,14 @@
                   <button
                     type="submit"
                     :disabled="saving"
-                    class="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 transition"
+                    class="flex-1 inline-flex items-center justify-center px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition shadow-sm"
                   >
+                    <svg v-if="!saving" class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3-3m0 0l-3 3m3-3v12" />
+                    </svg>
+                    <svg v-else class="w-4 h-4 mr-2 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
                     {{ saving ? '儲存中...' : '儲存' }}
                   </button>
                 </div>
@@ -620,9 +626,11 @@
                   </div>
                 </div>
                 
-                <!-- 上傳新照片 -->
+                <!-- 上傳新照片 (美化按鈕) -->
                 <div>
                   <label class="block text-sm font-medium text-gray-700 mb-2">上傳新照片</label>
+                  
+                  <!-- 隱藏的原生檔案輸入 -->
                   <input
                     ref="imageInput"
                     type="file"
@@ -630,10 +638,27 @@
                     accept="image/*"
                     @change="handleImageUpload"
                     :disabled="uploading"
-                    class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                    class="hidden"
                   />
-                  <p v-if="uploading" class="text-xs text-blue-600 mt-1">📤 正在上傳圖片...</p>
-                  <p v-else class="text-xs text-gray-500 mt-1">支援 JPG、PNG 格式，最多5張</p>
+
+                  <!-- 美化的上傳按鈕 -->
+                  <button
+                    type="button"
+                    @click="!uploading && imageInput && imageInput.click()"
+                    :disabled="uploading"
+                    class="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <svg v-if="!uploading" class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                    <svg v-else class="w-4 h-4 mr-2 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    {{ uploading ? '正在上傳...' : '選擇照片' }}
+                  </button>
+
+                  <p v-if="uploading" class="text-xs text-blue-600 mt-2">📤 正在上傳圖片...</p>
+                  <p v-else class="text-xs text-gray-500 mt-2">支援 JPG、PNG 格式，最多5張</p>
                 </div>
               </div>
 
@@ -741,32 +766,61 @@
                     ></textarea>
                   </div>
                   
-                  <!-- 醫療證明檔案上傳 -->
+                  <!-- 醫療證明檔案上傳 (美化按鈕) -->
                   <div>
                     <label class="block text-xs text-gray-600 mb-1">醫療證明</label>
+
+                    <!-- 隱藏的原生檔案輸入，保留 ref 與事件處理 -->
                     <input
                       ref="medicalFileInput"
                       type="file"
                       multiple
                       accept=".pdf,.jpg,.jpeg,.png"
                       @change="handleMedicalFileSelect"
-                      class="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      class="hidden"
                     />
-                    <p class="text-xs text-gray-500 mt-1">支援 PDF、JPG、PNG 格式</p>
-                    
-                    <!-- 顯示選擇的檔案 -->
-                    <div v-if="selectedMedicalFiles.length > 0" class="mt-2 space-y-1">
+
+                    <!-- 美化按鈕與已選檔案數顯示 -->
+                    <div class="flex items-center gap-3">
+                      <button
+                        type="button"
+                        @click="medicalFileInput && medicalFileInput.click()"
+                        class="inline-flex items-center px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition shadow-sm"
+                      >
+                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7a2 2 0 012-2h10a2 2 0 012 2v10a2 2 0 01-2 2H6a2 2 0 01-2-2V7zM8 11l3 3 5-5" />
+                        </svg>
+                        上傳醫療證明
+                      </button>
+
+                      <div v-if="selectedMedicalFiles.length > 0" class="text-sm text-gray-700">
+                        已選 {{ selectedMedicalFiles.length }} 個檔案
+                      </div>
+                    </div>
+
+                    <p class="text-xs text-gray-500 mt-2">支援 PDF、JPG、PNG 格式，最大單檔請依系統限制</p>
+
+                    <!-- 顯示選擇的檔案（預覽列表） -->
+                    <div v-if="selectedMedicalFiles.length > 0" class="mt-3 space-y-2">
                       <div
                         v-for="(file, index) in selectedMedicalFiles"
                         :key="index"
-                        class="flex justify-between items-center p-2 bg-blue-50 rounded text-xs"
+                        class="flex justify-between items-center p-2 bg-blue-50 border border-blue-200 rounded-md"
                       >
-                        <span>📎 {{ file.name }}</span>
+                        <div class="flex items-center">
+                          <svg class="w-4 h-4 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                          </svg>
+                          <span class="text-sm text-blue-700 truncate">{{ file.name }}</span>
+                        </div>
                         <button
                           @click="removeSelectedMedicalFile(index)"
-                          class="text-red-500 hover:text-red-700"
+                          class="text-red-500 hover:text-red-700 transition-colors p-1"
+                          title="移除檔案"
                         >
-                          ✕
+                          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                          </svg>
                         </button>
                       </div>
                     </div>
