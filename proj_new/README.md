@@ -120,11 +120,10 @@ proj_new/
 ### 使用 Docker Compose 啟動（推薦）
 
 ```bash
-
 # 移除所有服務(刪除所有SQL和minio圖片資料，重啟)(可選)
 docker-compose down -v
 
-# 複製環境變數檔案
+# 複製環境變數檔案（包含預配置的Gmail SMTP設定）
 cp .env.example .env
 cp backend/.env.example backend/.env
 cp frontend/.env.example frontend/.env
@@ -132,10 +131,15 @@ cp frontend/.env.example frontend/.env
 # 啟動所有服務
 docker-compose up -d
 
-# 初始化資料庫 (首次啟動時)
-docker-compose exec backend flask db upgrade
+# 等待服務完全啟動（約15秒）
+timeout 15  # Windows: timeout /t 15
 
-# 建立測試帳號 (可選)
+# 初始化資料庫（首次啟動時）
+docker-compose exec backend flask db upgrade
+# 如遇到遷移問題，執行：
+docker-compose exec backend flask db stamp f024b1dbf16b
+
+# 建立測試帳號（推薦）
 docker-compose exec backend python create_test_accounts.py
 
 # 查看服務狀態
@@ -152,6 +156,13 @@ docker-compose logs -f
 - MinIO 控制台: http://localhost:9001
 - MySQL: localhost:3307
 - Redis: localhost:6379
+
+**郵件功能**：
+- ✅ **SMTP 已預配置** - 使用 Gmail SMTP (usershelter702@gmail.com)
+- 📧 **註冊驗證郵件** - 新用戶註冊時自動發送
+- 🔐 **密碼重設郵件** - 忘記密碼時發送重設連結
+- 📋 **領養申請通知** - 申請審核結果自動通知
+- 測試 SMTP: `docker-compose exec backend python -c "from app import create_app; from app.services.email_service import email_service; app = create_app(); app.app_context().__enter__(); print('SMTP 測試:', email_service.send_verification_email('test@example.com', 'test', 'token123'))"`
 
 **開發注意事項:**
 - 前端支援熱模組替換 (HMR)，修改程式碼後瀏覽器會自動刷新
@@ -270,6 +281,14 @@ npm run build
 - 任務狀態追蹤
 - 管理員審批流程
 
+### 9. 郵件通知系統
+- **註冊驗證郵件** - 新用戶註冊後自動發送 24 小時有效驗證連結
+- **密碼重設郵件** - 忘記密碼時發送 1 小時有效重設連結  
+- **領養申請通知** - 申請核准/拒絕時自動通知申請人
+- **申請狀態更新** - 包含審核意見和收容所聯絡資訊
+- **異步發送機制** - 使用 Celery 任務隊列，支援重試和錯誤處理
+- **Gmail SMTP 集成** - 預配置 Gmail SMTP 服務，開箱即用
+
 ## API 文檔
 
 API 文檔使用 OpenAPI 3.0 規範，可通過以下方式訪問：
@@ -339,6 +358,12 @@ docker-compose exec backend python create_test_accounts.py
 | 收容所會員 | shelter@test.com | Shelter123 | 收容所管理功能 |
 | 一般會員 | user@test.com | User123 | 基本用戶功能 |
 | 一般會員2 | user2@test.com | User123 | 額外測試帳號 |
+
+**真實郵件測試**：
+- 您可以用真實的 Gmail 地址註冊新帳號來測試郵件功能
+- 系統會發送真實的驗證郵件到您的信箱（請檢查垃圾郵件夾）
+- 郵件包含驗證連結和 24 小時有效的 token
+- 發送者：usershelter702@gmail.com
 
 **注意**: 
 - 測試帳號僅供開發環境使用，生產環境請使用強密碼
