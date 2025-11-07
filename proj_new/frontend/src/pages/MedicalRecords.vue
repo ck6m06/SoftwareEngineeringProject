@@ -43,6 +43,66 @@
         </div>
       </div>
 
+      <!-- 篩選面板 -->
+      <div class="mb-6 bg-white p-4 rounded-lg shadow-sm">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">名稱</label>
+            <input v-model="filters.name" type="text" placeholder="輸入名稱或關鍵字" class="w-full border border-gray-300 rounded-md px-3 py-2" />
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">物種</label>
+            <select v-model="filters.species" class="w-full border border-gray-300 rounded-md px-3 py-2">
+              <option value="">全部</option>
+              <option value="CAT">貓</option>
+              <option value="DOG">狗</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">品種</label>
+            <input v-model="filters.breed" type="text" placeholder="品種（部分匹配）" class="w-full border border-gray-300 rounded-md px-3 py-2" />
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">年齡</label>
+            <select
+              v-model="ageRange"
+              class="w-full border border-gray-300 rounded-md px-3 py-2"
+              @change="handleAgeChange"
+            >
+              <option value="">全部年齡</option>
+              <option value="0-6">幼年 (0-6個月)</option>
+              <option value="6-12">青少年 (6個月-1歲)</option>
+              <option value="12-36">成年 (1-3歲)</option>
+              <option value="36-84">中年 (3-7歲)</option>
+              <option value="84-999">老年 (7歲以上)</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">是否已領養</label>
+              <select v-model="filters.adopted" class="w-full border border-gray-300 rounded-md px-3 py-2">
+                <option value="">全部</option>
+                <option :value="true">已領養</option>
+                <option :value="false">未領養</option>
+              </select>
+          </div>
+
+          <div>
+            <!-- 空間保留，用於未來擴充 -->
+          </div>
+        </div>
+
+        <div class="mt-4 flex items-center gap-3">
+          <button @click="applyFilters" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">搜尋</button>
+          <button @click="clearFilters" class="px-4 py-2 border rounded-md">清除</button>
+        </div>
+      </div>
+
       <!-- Loading -->
       <div v-if="loading" class="text-center py-12">
         <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-4"></div>
@@ -600,12 +660,25 @@ const canManageSelectedAnimal = computed(() => {
   return false
 })
 
-// 載入動物列表
-const loadAnimals = async () => {
+// 篩選條件
+const filters = reactive({
+  name: '',
+  species: '',
+  breed: '',
+  min_age: null,
+  max_age: null,
+  adopted: ''
+})
+
+// 與 /animals 頁面一致的年齡範圍控制
+const ageRange = ref('')
+
+// 載入動物列表（支援篩選）
+const loadAnimals = async (params = {}) => {
   loading.value = true
   try {
-    console.log('🔍 載入動物列表（醫療記錄權限）')
-    const response = await getAnimalsForMedicalRecords()
+    console.log('🔍 載入動物列表（醫療記錄權限） with params', params)
+    const response = await getAnimalsForMedicalRecords(params)
     animals.value = response.animals || []
     console.log('📋 載入到的動物數量:', animals.value.length)
   } catch (error) {
@@ -613,6 +686,43 @@ const loadAnimals = async () => {
   } finally {
     loading.value = false
   }
+}
+
+const applyFilters = async () => {
+  const params = {}
+  if (filters.name) params.name = filters.name
+  if (filters.species) params.species = filters.species
+  if (filters.breed) params.breed = filters.breed
+  if (filters.min_age !== null && filters.min_age !== '') params.min_age = filters.min_age
+  if (filters.max_age !== null && filters.max_age !== '') params.max_age = filters.max_age
+  if (filters.adopted !== '') params.adopted = filters.adopted
+
+  await loadAnimals(params)
+}
+
+const clearFilters = async () => {
+  filters.name = ''
+  filters.species = ''
+  filters.breed = ''
+  filters.min_age = null
+  filters.max_age = null
+  filters.adopted = ''
+  ageRange.value = ''
+  await loadAnimals()
+}
+
+// 將 ageRange 轉換為 min_age / max_age (單位：月)
+const handleAgeChange = () => {
+  if (!ageRange.value) {
+    filters.min_age = null
+    filters.max_age = null
+  } else {
+    const [min, max] = ageRange.value.split('-').map(v => parseInt(v, 10))
+    filters.min_age = isNaN(min) ? null : min
+    filters.max_age = (isNaN(max) || max === 999) ? null : max
+  }
+  // 立即套用
+  applyFilters()
 }
 
 // 載入醫療記錄

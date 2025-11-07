@@ -25,8 +25,8 @@ export interface AnimalsForMedicalRecordsResponse {
 /**
  * 取得當前用戶有權限管理醫療紀錄的動物列表
  */
-export async function getAnimalsForMedicalRecords() {
-  const response = await api.get<AnimalsForMedicalRecordsResponse>('/medical-records/animals')
+export async function getAnimalsForMedicalRecords(params?: Record<string, any>) {
+  const response = await api.get<AnimalsForMedicalRecordsResponse>('/medical-records/animals', { params })
   return response.data
 }
 
