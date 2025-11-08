@@ -381,13 +381,21 @@
             v-else
             type="submit"
             class="btn-primary"
-            :disabled="isSubmitting || (!isEditMode && !fileUploader?.files?.length && !uploadedPhotos.length)"
+            :disabled="isSubmitting || submissionSuccess"
           >
             {{ isSubmitting ? '送出中...' : isEditMode ? '儲存修改' : '確認送出' }}
           </button>
         </div>
       </div>
     </form>
+
+    <!-- 送出成功後的快速操作 -->
+    <div v-if="submissionSuccess" class="mt-6 p-4 bg-green-50 border border-green-200 rounded">
+      <p class="text-lg font-semibold text-green-800">{{ successMessage || '送養已提交成功！' }}</p>
+      <div class="mt-3">
+        <button type="button" class="btn-primary" @click="router.push('/')">回首頁</button>
+      </div>
+    </div>
 
     <!-- 醫療紀錄 Modal -->
     <div v-if="showMedicalModal" class="modal-overlay" @click.self="closeMedicalModal">
@@ -457,7 +465,8 @@
               accept="image/*,.pdf"
               :multiple="true"
               :max-size="10 * 1024 * 1024"
-              :auto-upload="false"
+              :auto-upload="true"
+              :show-start-button="false"
               @uploaded="onMedicalFilesUploaded"
               @error="onMedicalUploadError"
             />
@@ -525,6 +534,10 @@ const steps = ['基本資訊', '上傳照片', '醫療資訊', '確認送出']
 const currentStep = ref(0)
 const isSubmitting = ref(false)
 const errorMessage = ref('')
+
+// 提交成功狀態
+const submissionSuccess = ref(false)
+const successMessage = ref('')
 
 const fileUploader = ref<InstanceType<typeof FileUploader>>()
 const medicalFileUploader = ref<InstanceType<typeof FileUploader>>()
@@ -1032,14 +1045,12 @@ async function handleSubmit() {
     // 清除草稿
     localStorage.removeItem('rehome_draft')
 
-    // 導向到合適的頁面：收容所成員在單次送養後應回到「收容所動物管理」，其他使用者回到「我的送養」
-    const message = isEditMode.value ? '送養資訊已更新並提交審核成功!' : '送養資訊已建立並提交審核成功!'
-    alert(message + '\n審核通過後將會公開顯示。')
-    if (authStore.user?.role === 'SHELTER_MEMBER') {
-      router.push('/shelter/animals')
-    } else {
-      router.push('/my-rehomes')
-    }
+  // 導向到合適的頁面：收容所成員在單次送養後應回到「收容所動物管理」，其他使用者回到「我的送養」
+  const message = isEditMode.value ? '送養資訊已更新並提交審核成功!' : '送養資訊已建立並提交審核成功!'
+  // 顯示成功狀態，讓使用者自行決定下一步 (例如回首頁)
+  submissionSuccess.value = true
+  successMessage.value = message
+  alert(message + '\n審核通過後將會公開顯示。')
   } catch (error: any) {
     console.error('Submit error:', error)
     
@@ -1085,13 +1096,11 @@ async function handleSubmit() {
           }
         }
         
-        alert('送養資訊已建立成功!')
-        if (authStore.user?.role === 'SHELTER_MEMBER') {
-          router.push('/shelter/animals')
-        } else {
-          router.push('/my-rehomes')
-        }
-        return
+  // 顯示成功狀態，讓使用者自行決定下一步 (例如回首頁)
+  submissionSuccess.value = true
+  successMessage.value = '送養資訊已建立成功!'
+  alert('送養資訊已建立成功!')
+  return
       } catch (retryError) {
         alert('重新建立送養資訊失敗')
       }
@@ -1184,31 +1193,81 @@ async function handleMedicalSubmit() {
   medicalUploadError.value = ''
   
   try {
-    // 如果沒有動物ID,儲存為暫存記錄
+    // 如果沒有動物ID: 為了立即上傳醫療附件，我們先建立一筆 DRAFT 動物，再上傳並建立醫療紀錄
     if (!editingAnimalId.value) {
-      // 處理暫存記錄
-      const tempRecord = {
-        record_type: medicalFormData.value.record_type,
-        date: medicalFormData.value.date,
-        provider: medicalFormData.value.provider,
-        details: medicalFormData.value.details,
-        attachments: medicalFormData.value.attachments || [],
-        files: medicalFileUploader.value?.files || [] // 保存File對象,稍後上傳
+      // 需要確保表單已填入必要的基本資訊 (名稱、物種等)
+      if (!formData.name || !formData.species) {
+        alert('請先在基本資訊填寫動物名稱與物種，才能新增醫療紀錄並上傳附件')
+        submittingMedical.value = false
+        return
       }
-      
-      if (editingTempRecordIndex.value !== null) {
-        // 更新暫存記錄
-        tempMedicalRecords.value[editingTempRecordIndex.value] = tempRecord
-        alert('暫存醫療記錄已更新')
-      } else {
-        // 新增暫存記錄
-        tempMedicalRecords.value.push(tempRecord)
-        alert('醫療記錄已暫存,將在確認送出時一併儲存')
+
+      try {
+        // 建立新的草稿動物以取得 animalId
+        const animalData = {
+          name: formData.name,
+          species: formData.species as 'CAT' | 'DOG',
+          breed: formData.breed || undefined,
+          color: formData.color || undefined,
+          sex: formData.sex || undefined,
+          dob: formData.dob || undefined,
+          description: formData.description || undefined,
+          medical_summary: formData.medical_summary || undefined,
+          status: 'DRAFT' as const,
+        }
+
+        const result = await createAnimal(animalData)
+        const newAnimalId = result.animal.animal_id
+
+        // 導航到編輯模式，並等待路由更新
+        await router.replace({ path: '/rehome-form', query: { id: newAnimalId } })
+        await loadMedicalRecords()
+
+        // 如果有檔案，立即上傳附件並建立醫療紀錄
+        const uploaderFiles = medicalFileUploader.value?.files || []
+        let uploadedAttachments: any[] = []
+
+        if (uploaderFiles.length > 0) {
+          try {
+            const { uploadMultiple } = useUpload()
+            const files = uploaderFiles.map((item: any) => item.file)
+            const uploadResults = await uploadMultiple(files, 'MEDICAL_RECORD', newAnimalId)
+
+            uploadedAttachments = uploadResults.map(result => ({
+              url: result.url,
+              storage_key: result.storage_key,
+              filename: result.filename,
+              mime_type: result.mime_type,
+              size: result.size
+            }))
+          } catch (uploadError) {
+            console.error('附件上傳失敗:', uploadError)
+            medicalUploadError.value = '附件上傳失敗,請稍後再試'
+            submittingMedical.value = false
+            return
+          }
+        }
+
+        const allAttachments = [ ...(medicalFormData.value.attachments || []), ...uploadedAttachments ]
+        const submitData = { ...medicalFormData.value, attachments: allAttachments }
+
+        await createMedicalRecord(newAnimalId, submitData)
+        alert('醫療記錄已新增並上傳附件')
+
+        // 清空上傳器
+        if (medicalFileUploader.value) medicalFileUploader.value.files = []
+
+        // 載入最新醫療記錄
+        await loadMedicalRecords()
+        closeMedicalModal()
+        submittingMedical.value = false
+        return
+      } catch (err: any) {
+        console.error('建立草稿並上傳醫療紀錄失敗:', err)
+        alert(err.response?.data?.message || '建立草稿或上傳附件失敗')
+        submittingMedical.value = false
+        return
       }
-      
-      closeMedicalModal()
-      submittingMedical.value = false
-      return
     }
 
     // 有動物ID,直接儲存到後端

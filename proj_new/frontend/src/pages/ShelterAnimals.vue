@@ -27,7 +27,7 @@
       <!-- 篩選和批次操作區域 -->
       <div class="bg-white rounded-lg shadow-md p-6 mb-8">
         <!-- 篩選區 -->
-        <div class="grid md:grid-cols-4 gap-4 mb-6">
+        <div class="grid md:grid-cols-6 gap-4 mb-6">
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-2">狀態篩選</label>
             <select
@@ -56,6 +56,38 @@
               <option value="DOG"> 狗</option>
             </select>
           </div>
+
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">關鍵字</label>
+            <input
+              v-model="filters.keyword"
+              @keyup.enter="loadAnimals"
+              type="text"
+              placeholder="搜尋名稱 / 品種 / 顏色"
+              class="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">性別</label>
+            <select
+              v-model="filters.sex"
+              @change="loadAnimals"
+              class="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">全部</option>
+              <option value="MALE">公</option>
+              <option value="FEMALE">母</option>
+              <option value="UNKNOWN">未知</option>
+            </select>
+          </div>
+          
+          <div class="flex items-center">
+            <label class="flex items-center gap-2 text-sm text-gray-700">
+              <input type="checkbox" v-model="filters.vaccinated" @change="loadAnimals" class="rounded border-gray-300 text-blue-600"/>
+              <span>已接種疫苗</span>
+            </label>
+          </div>
           
           <div class="md:col-span-2 flex items-end gap-2">
             <button
@@ -70,6 +102,7 @@
             >
               清除篩選
             </button>
+            
           </div>
         </div>
 
@@ -905,6 +938,11 @@ const editForm = reactive({
 const filters = reactive<ShelterAnimalsFilters>({
   status: undefined,
   species: undefined,
+  sex: undefined,
+  keyword: undefined,
+  min_age: undefined,
+  max_age: undefined,
+  vaccinated: undefined,
   page: 1,
   per_page: 12
 })
@@ -972,11 +1010,14 @@ function handleClickOutside(event: Event) {
 // 清除篩選條件
 function clearFilters() {
   Object.assign(filters, {
-    species: '',
-    status: '',
-    name: '',
-    chip_id: '',
-    medical_status: ''
+    species: undefined,
+    status: undefined,
+    sex: undefined,
+    keyword: undefined,
+    min_age: undefined,
+    max_age: undefined,
+    vaccinated: undefined,
+    page: 1
   })
   loadAnimals()
 }
@@ -1042,6 +1083,11 @@ async function loadAnimals() {
 function resetFilters() {
   filters.status = undefined
   filters.species = undefined
+  filters.sex = undefined
+  filters.keyword = undefined
+  filters.min_age = undefined
+  filters.max_age = undefined
+  filters.vaccinated = undefined
   filters.page = 1
   loadAnimals()
 }

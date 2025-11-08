@@ -25,6 +25,11 @@ export interface SheltersResponse {
 export interface ShelterAnimalsFilters {
   status?: 'DRAFT' | 'SUBMITTED' | 'PUBLISHED' | 'RETIRED'
   species?: 'CAT' | 'DOG'
+  sex?: 'MALE' | 'FEMALE' | 'UNKNOWN'
+  keyword?: string
+  min_age?: number
+  max_age?: number
+  vaccinated?: boolean
   page?: number
   per_page?: number
 }

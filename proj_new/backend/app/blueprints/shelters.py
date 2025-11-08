@@ -10,7 +10,8 @@ from app import db
 from app.models.shelter import Shelter
 from app.models.user import User, UserRole
 from app.models.others import Job, JobType, JobStatus
-from app.models.animal import Animal, AnimalStatus, Species, AnimalImage
+from app.models.animal import Animal, AnimalStatus, Species, AnimalImage, Sex
+from app.models.medical_record import MedicalRecord, RecordType
 from app.services.audit_service import audit_service
 import re
 
@@ -671,9 +672,16 @@ def get_shelter_animals(shelter_id):
     if not check_shelter_member_or_admin(current_user_id, shelter_id):
         abort(403, message='無權限查看收容所動物')
     
-    # 取得查詢參數
+    # 取得查詢參數 (新增 sex, min_age, max_age, vaccinated, keyword)
     status = request.args.get('status')
     species = request.args.get('species')
+    sex = request.args.get('sex')
+    keyword = request.args.get('keyword') or request.args.get('q')
+    # 年齡以整數年為單位
+    min_age = request.args.get('min_age', type=int)
+    max_age = request.args.get('max_age', type=int)
+    # vaccinated: 'true' or 'false' (optional)
+    vaccinated = request.args.get('vaccinated')
     page = request.args.get('page', 1, type=int)
     per_page = min(request.args.get('per_page', 20, type=int), 100)
     
@@ -697,6 +705,58 @@ def get_shelter_animals(shelter_id):
             query = query.filter_by(species=species_enum)
         except KeyError:
             abort(400, message=f'無效的物種: {species}')
+
+    # 性別篩選
+    if sex:
+        try:
+            sex_enum = Sex[sex.upper()]
+            query = query.filter_by(sex=sex_enum)
+        except KeyError:
+            abort(400, message=f'無效的性別: {sex}')
+
+    # 關鍵字搜尋 (在 name, breed, color 上模糊匹配)
+    if keyword:
+        kw = f"%{keyword}%"
+        query = query.filter(
+            db.or_(
+                Animal.name.ilike(kw),
+                Animal.breed.ilike(kw),
+                Animal.color.ilike(kw)
+            )
+        )
+
+    # 年齡範圍 (以生日 dob 反推)
+    if min_age is not None or max_age is not None:
+        today = datetime.utcnow().date()
+        if min_age is not None:
+            # 年齡 >= min_age => dob <= today - min_age years
+            try:
+                cutoff_max = today.replace(year=today.year - min_age)
+            except ValueError:
+                # 跨閏年的簡單處理: 若發生錯誤，回退一天
+                cutoff_max = today.replace(year=today.year - min_age)
+            query = query.filter(Animal.dob != None).filter(Animal.dob <= cutoff_max)
+        if max_age is not None:
+            # 年齡 <= max_age => dob >= today - max_age years
+            try:
+                cutoff_min = today.replace(year=today.year - max_age)
+            except ValueError:
+                cutoff_min = today.replace(year=today.year - max_age)
+            query = query.filter(Animal.dob != None).filter(Animal.dob >= cutoff_min)
+
+    # 已接種疫苗篩選 (根據是否存在已驗證的 VACCINE 醫療記錄)
+    if vaccinated is not None:
+        vaccinated_bool = str(vaccinated).lower() == 'true'
+        if vaccinated_bool:
+            # 至少有一筆 record_type == VACCINE 且 verified == True
+            query = query.filter(Animal.medical_records.any(
+                db.and_(MedicalRecord.record_type == RecordType.VACCINE, MedicalRecord.verified == True)
+            ))
+        else:
+            # 沒有任何已驗證的 VACCINE 記錄
+            query = query.filter(~Animal.medical_records.any(
+                db.and_(MedicalRecord.record_type == RecordType.VACCINE, MedicalRecord.verified == True)
+            ))
     
     # 分頁
     pagination = query.order_by(Animal.created_at.desc()).paginate(

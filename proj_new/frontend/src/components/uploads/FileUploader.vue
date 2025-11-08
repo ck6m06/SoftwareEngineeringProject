@@ -75,7 +75,7 @@
     <!-- 操作按鈕組 -->
     <div v-if="files.length > 0" class="actions mt-4 flex gap-2">
       <button
-        v-if="!autoUpload"
+        v-if="!autoUpload && showStartButton"
         type="button"
         class="btn-primary"
         :disabled="isUploading || files.every(f => f.status === 'success')"
@@ -105,6 +105,7 @@ interface Props {
   multiple?: boolean
   maxSize?: number // bytes
   autoUpload?: boolean
+  showStartButton?: boolean
   ownerType?: string
   ownerId?: number
 }
@@ -114,6 +115,7 @@ const props = withDefaults(defineProps<Props>(), {
   multiple: true,
   maxSize: 10 * 1024 * 1024, // 10MB
   autoUpload: false,
+  showStartButton: true,
 })
 
 const emit = defineEmits<{
