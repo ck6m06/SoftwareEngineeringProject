@@ -25,12 +25,12 @@
             <p class="text-gray-600">詳細的動物資料、健康紀錄與照片</p>
           </div>
           <div class="bg-white p-6 rounded-lg shadow-md text-center hover:shadow-lg transition cursor-pointer" @click="$router.push('/shelters')">
-            <div class="text-4xl mb-4">�</div>
+            <div class="text-4xl mb-4">🏠</div>
             <h3 class="text-xl font-semibold mb-2">認證收容所</h3>
             <p class="text-gray-600">瀏覽各地收容所資訊與收容動物</p>
           </div>
           <div class="bg-white p-6 rounded-lg shadow-md text-center hover:shadow-lg transition">
-            <div class="text-4xl mb-4">�🏥</div>
+            <div class="text-4xl mb-4">🏥</div>
             <h3 class="text-xl font-semibold mb-2">完整醫療紀錄</h3>
             <p class="text-gray-600">疫苗、健檢、治療等完整記錄</p>
           </div>
