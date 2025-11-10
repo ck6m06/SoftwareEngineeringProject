@@ -15,10 +15,11 @@
                 <p class="text-blue-800 mb-2">作為系統管理員，您可以：</p>
                 <ul class="list-disc list-inside text-blue-800 space-y-1">
                   <li><strong>查看所有動物</strong>：管理平台上所有動物的醫療記錄</li>
-                  <li><strong>新增/編輯記錄</strong>：為任何動物建立或修改醫療記錄</li>
                   <li><strong>驗證記錄</strong>：驗證醫療記錄的真實性和準確性</li>
-                  <li><strong>全面監管</strong>：確保醫療記錄的品質和合規性</li>
+                  <li><strong>品質監管</strong>：確保醫療記錄的品質和合規性</li>
+                  <li><strong>審核管理</strong>：對不實或有問題的記錄進行處理</li>
                 </ul>
+                <p class="text-blue-600 text-sm mt-2 italic">* 為確保醫療記錄的專業性，管理員無法直接新增或編輯記錄，僅能進行驗證和監督。</p>
               </template>
               <template v-else-if="authStore.user?.role === 'SHELTER_MEMBER'">
                 <p class="text-blue-800 mb-2">作為收容所會員，您可以：</p>
