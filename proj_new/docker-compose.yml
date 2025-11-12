@@ -1,0 +1,174 @@
+version: '3.8'
+
+services:
+  # MySQL 資料庫
+  mysql:
+    image: mysql:8.0
+    container_name: pet-adoption-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-password}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-pet_adoption}
+      MYSQL_USER: ${MYSQL_USER:-petuser}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-petpassword}
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    networks:
+      - pet-adoption-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis
+  redis:
+    image: redis:7-alpine
+    container_name: pet-adoption-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - pet-adoption-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # MinIO (Object Storage)
+  minio:
+    image: minio/minio:latest
+    container_name: pet-adoption-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin123}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+      # 設置 MinIO 的公開訪問 URL (給瀏覽器使用)
+      MINIO_SERVER_URL: http://localhost:9000
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    command: server /data --console-address ":9001"
+    networks:
+      - pet-adoption-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # Flask 後端
+  backend:
+    build:
+      context: ./backend
+      dockerfile: ../docker/backend.Dockerfile
+    container_name: pet-adoption-backend
+    restart: unless-stopped
+    environment:
+      FLASK_ENV: ${FLASK_ENV:-production}
+      DATABASE_URL: mysql+pymysql://${MYSQL_USER:-petuser}:${MYSQL_PASSWORD:-petpassword}@mysql:3306/${MYSQL_DATABASE:-pet_adoption}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      MINIO_ENDPOINT: minio:9000
+      MINIO_EXTERNAL_ENDPOINT: localhost:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin123}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+      MINIO_SECURE: "false"
+      SECRET_KEY: ${SECRET_KEY}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      CORS_ORIGINS: "http://localhost:5173"
+      # SMTP settings (read from .env)
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
+      SMTP_USE_SSL: ${SMTP_USE_SSL:-false}
+      SMTP_FROM: ${SMTP_FROM:-no-reply@example.com}
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - mysql
+      - redis
+      - minio
+    networks:
+      - pet-adoption-network
+
+  # Celery Worker
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: ../docker/backend.Dockerfile
+    container_name: pet-adoption-celery
+    restart: unless-stopped
+    command: celery -A app.celery worker --loglevel=info
+    environment:
+      FLASK_ENV: ${FLASK_ENV:-production}
+      DATABASE_URL: mysql+pymysql://${MYSQL_USER:-petuser}:${MYSQL_PASSWORD:-petpassword}@mysql:3306/${MYSQL_DATABASE:-pet_adoption}
+      REDIS_HOST: redis
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      # SMTP settings (mirror backend) - required so worker can send emails
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
+      SMTP_USE_SSL: ${SMTP_USE_SSL:-false}
+      SMTP_FROM: ${SMTP_FROM:-no-reply@example.com}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin123}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+      SECRET_KEY: ${SECRET_KEY}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - mysql
+      - redis
+      - minio
+    networks:
+      - pet-adoption-network
+
+  # Vue 3 前端
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ../docker/frontend.Dockerfile
+      target: development
+    container_name: pet-adoption-frontend
+    restart: unless-stopped
+    environment:
+      VITE_API_BASE_URL: http://localhost:5000/api
+      NODE_ENV: development
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    networks:
+      - pet-adoption-network
+    stdin_open: true
+    tty: true
+
+volumes:
+  mysql-data:
+  redis-data:
+  minio-data:
+
+networks:
+  pet-adoption-network:
+    driver: bridge

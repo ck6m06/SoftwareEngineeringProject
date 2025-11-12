@@ -1,0 +1,51 @@
+# Flask Core
+Flask==3.0.0
+Werkzeug==3.0.1
+
+# Flask Extensions
+flask-smorest==0.42.3
+flask-cors==4.0.0
+flask-jwt-extended==4.5.3
+flask-migrate==4.0.5
+flask-sqlalchemy==3.1.1
+
+# Database
+SQLAlchemy==2.0.23
+pymysql==1.1.0
+cryptography==41.0.7
+alembic==1.13.0
+
+# Redis & Celery
+redis==5.0.1
+celery==5.3.4
+
+# MinIO / S3
+minio==7.2.0
+boto3==1.34.12
+
+# Validation & Serialization
+marshmallow==3.20.1
+marshmallow-sqlalchemy==0.29.0
+python-dotenv==1.0.0
+
+# Security
+bcrypt==4.1.2
+argon2-cffi==23.1.0
+
+# Utilities
+python-dateutil==2.8.2
+pytz==2023.3
+click==8.1.7
+
+# Rate Limiting
+Flask-Limiter==3.5.0
+
+# Monitoring
+sentry-sdk[flask]==1.39.1
+
+# Development
+pytest==7.4.3
+pytest-flask==1.3.0
+pytest-cov==4.1.0
+faker==20.1.0
+factory-boy==3.3.0

@@ -1,0 +1,62 @@
+# ============================================
+# 根目錄通用 .gitignore
+# 子專案有各自的 .gitignore
+# ============================================
+
+# IDEs
+.vscode/
+.idea/
+*.iml
+*.code-workspace
+*.sublime-workspace
+*.sublime-project
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.swp
+*.swo
+*~
+.Spotlight-V100
+.Trashes
+._*
+*.lnk
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+logs/
+*.log
+
+# Temp files
+tmp/
+temp/
+*.backup
+*.bak
+*.tmp
+
+# Local history
+.history/
+
+# Editor temporaries
+.*.sw[op]
+
+# Python cache (通用)
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Node modules (通用)
+node_modules/
+
+# Build artifacts (通用)
+dist/
+build/
+
+# End of root .gitignore
+
