@@ -49,19 +49,6 @@
       <!-- 快速連結 -->
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <button
-          @click="router.push('/admin/applications')"
-          class="bg-white rounded-lg shadow p-4 hover:shadow-lg transition text-left"
-        >
-          <div class="flex items-center gap-3">
-            <div class="text-3xl">📋</div>
-            <div>
-              <p class="font-semibold text-gray-900">申請審核管理</p>
-              <p class="text-sm text-gray-600">審核領養申請</p>
-            </div>
-          </div>
-        </button>
-
-        <button
           @click="router.push('/medical-records')"
           class="bg-white rounded-lg shadow p-4 hover:shadow-lg transition text-left"
         >
