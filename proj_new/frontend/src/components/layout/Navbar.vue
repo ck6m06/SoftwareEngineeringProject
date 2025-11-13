@@ -189,32 +189,11 @@
                 <!-- 收容所成員功能 -->
                 <template v-if="authStore.user?.role === 'SHELTER_MEMBER'">
                   <div class="border-t border-gray-200 my-1"></div>
-                  <router-link
-                    to="/shelter/applications"
-                    class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                    @click="showUserMenu = false"
-                  >
-                    📋 審核管理
-                  </router-link>
-                  <router-link
-                    to="/shelter/animals"
-                    class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                    @click="showUserMenu = false"
-                  >
-                    🐾 動物管理
-                  </router-link>
                 </template>
 
                 <!-- 一般會員功能（個人送養者） -->
                 <template v-if="authStore.user?.role === 'GENERAL_MEMBER'">
                   <div class="border-t border-gray-200 my-1"></div>
-                  <router-link
-                    to="/applications"
-                    class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                    @click="showUserMenu = false"
-                  >
-                    📋 審核管理
-                  </router-link>
                 </template>
 
                 <!-- 管理員專用功能 -->
