@@ -11,6 +11,7 @@ services:
       MYSQL_DATABASE: ${MYSQL_DATABASE:-pet_adoption}
       MYSQL_USER: ${MYSQL_USER:-petuser}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-petpassword}
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     ports:
       - "3307:3306"
     volumes:
@@ -73,7 +74,7 @@ services:
     restart: unless-stopped
     environment:
       FLASK_ENV: ${FLASK_ENV:-production}
-      DATABASE_URL: mysql+pymysql://${MYSQL_USER:-petuser}:${MYSQL_PASSWORD:-petpassword}@mysql:3306/${MYSQL_DATABASE:-pet_adoption}
+      DATABASE_URL: mysql+pymysql://${MYSQL_USER:-petuser}:${MYSQL_PASSWORD:-petpassword}@mysql:3306/${MYSQL_DATABASE:-pet_adoption}?charset=utf8mb4
       REDIS_HOST: redis
       REDIS_PORT: 6379
       CELERY_BROKER_URL: redis://redis:6379/0
@@ -115,7 +116,7 @@ services:
     command: celery -A app.celery worker --loglevel=info
     environment:
       FLASK_ENV: ${FLASK_ENV:-production}
-      DATABASE_URL: mysql+pymysql://${MYSQL_USER:-petuser}:${MYSQL_PASSWORD:-petpassword}@mysql:3306/${MYSQL_DATABASE:-pet_adoption}
+      DATABASE_URL: mysql+pymysql://${MYSQL_USER:-petuser}:${MYSQL_PASSWORD:-petpassword}@mysql:3306/${MYSQL_DATABASE:-pet_adoption}?charset=utf8mb4
       REDIS_HOST: redis
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
@@ -150,7 +151,8 @@ services:
     container_name: pet-adoption-frontend
     restart: unless-stopped
     environment:
-      VITE_API_BASE_URL: http://localhost:5000/api
+      # 在容器內使用 Vite 代理，所以用相對路徑
+      VITE_API_BASE_URL: /api
       NODE_ENV: development
     ports:
       - "5173:5173"

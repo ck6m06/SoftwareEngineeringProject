@@ -15,8 +15,17 @@ class Config:
     TIMEZONE = 'Asia/Taipei'
     
     # Database
-    SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL', 'mysql+pymysql://root:password@localhost:3307/pet_adoption')
+    SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL', 'mysql+pymysql://root:password@localhost:3307/pet_adoption?charset=utf8mb4')
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    # Engine options for proper UTF-8 handling
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        'pool_pre_ping': True,
+        'pool_recycle': 300,
+        'connect_args': {
+            'charset': 'utf8mb4',
+            'use_unicode': True,
+        }
+    }
     # Temporarily enable SQL echo to help debugging (prints SQL statements to logs)
     SQLALCHEMY_ECHO = True
     

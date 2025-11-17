@@ -1,19 +1,158 @@
 """
-Medical Records Blueprint - 醫療紀錄 API
+Medical Records Blueprint - 醫療記錄 API
 """
 from flask import jsonify, request
 from flask_smorest import Blueprint, abort
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from datetime import datetime, date, timedelta
-from app import db
-from app.models.medical_record import MedicalRecord, RecordType
-from app.models.animal import Animal, AnimalStatus
-from sqlalchemy import or_, and_, func
-from sqlalchemy.sql import exists
-from app.models.user import User, UserRole
-from sqlalchemy import or_
+from app.services.medical_record_service import MedicalRecordService
 
-medical_records_bp = Blueprint('medical_records', __name__, description='醫療紀錄 API')
+medical_records_bp = Blueprint('medical_records', __name__, description='醫療記錄 API')
+
+
+@medical_records_bp.route('/animals', methods=['GET'])
+@jwt_required()
+def list_animals_for_medical_records():
+    """
+    獲取當前用戶有權限管理醫療記錄的動物列表
+    """
+    try:
+        current_user_id = int(get_jwt_identity())
+        
+        # 獲取篩選參數
+        filters = {
+            'name': request.args.get('name'),
+            'species': request.args.get('species'),
+            'breed': request.args.get('breed'),
+            'min_age': request.args.get('min_age'),
+            'max_age': request.args.get('max_age'),
+            'adopted': request.args.get('adopted')
+        }
+        
+        # 移除空值
+        filters = {k: v for k, v in filters.items() if v is not None}
+        
+        result = MedicalRecordService.list_animals_for_medical_records(
+            user_id=current_user_id,
+            filters=filters
+        )
+        
+        return jsonify(result), 200
+        
+    except ValueError as e:
+        abort(400, message=str(e))
+    except RuntimeError as e:
+        abort(500, message=str(e))
+
+
+@medical_records_bp.route('/animals/<int:animal_id>/medical-records', methods=['POST'])
+@jwt_required()
+def create_medical_record(animal_id):
+    """
+    為動物創建醫療記錄
+    需要認證 (動物擁有者、收容所成員或管理員)
+    """
+    try:
+        current_user_id = int(get_jwt_identity())
+        data = request.get_json()
+        
+        if not data:
+            abort(400, message='缺少請求資料')
+        
+        result = MedicalRecordService.create_medical_record(
+            user_id=current_user_id,
+            animal_id=animal_id,
+            data=data
+        )
+        
+        return jsonify(result), 201
+        
+    except ValueError as e:
+        if '動物不存在' in str(e):
+            abort(404, message=str(e))
+        elif '無權限' in str(e) or '用戶不存在' in str(e):
+            abort(403, message=str(e))
+        else:
+            abort(400, message=str(e))
+    except RuntimeError as e:
+        abort(500, message=str(e))
+
+
+@medical_records_bp.route('/animals/<int:animal_id>/medical-records', methods=['GET'])
+def list_medical_records(animal_id):
+    """
+    取得動物的醫療記錄列表 (公開端點)
+    """
+    try:
+        result = MedicalRecordService.list_medical_records(animal_id)
+        return jsonify(result), 200
+        
+    except ValueError as e:
+        abort(404, message=str(e))
+    except RuntimeError as e:
+        abort(500, message=str(e))
+
+
+@medical_records_bp.route('/<int:record_id>', methods=['PATCH'])
+@jwt_required()
+def update_medical_record(record_id):
+    """
+    更新醫療記錄
+    僅創建者、動物擁有者或管理員可更新
+    """
+    try:
+        current_user_id = int(get_jwt_identity())
+        data = request.get_json()
+        
+        if not data:
+            abort(400, message='缺少請求資料')
+        
+        result = MedicalRecordService.update_medical_record(
+            user_id=current_user_id,
+            record_id=record_id,
+            data=data
+        )
+        
+        return jsonify(result), 200
+        
+    except ValueError as e:
+        if '醫療記錄不存在' in str(e):
+            abort(404, message=str(e))
+        elif '管理員無法直接編輯' in str(e) or '無權限' in str(e):
+            abort(403, message=str(e))
+        else:
+            abort(400, message=str(e))
+    except RuntimeError as e:
+        abort(500, message=str(e))
+
+
+@medical_records_bp.route('/<int:record_id>/verify', methods=['POST'])
+@jwt_required()
+def verify_medical_record(record_id):
+    """
+    驗證醫療記錄 (僅管理員)
+    """
+    try:
+        current_user_id = int(get_jwt_identity())
+        data = request.get_json() or {}
+        verified = data.get('verified', True)
+        
+        result = MedicalRecordService.verify_medical_record(
+            admin_id=current_user_id,
+            record_id=record_id,
+            verified=verified
+        )
+        
+        return jsonify(result), 200
+        
+    except ValueError as e:
+        if '醫療記錄不存在' in str(e):
+            abort(404, message=str(e))
+        elif '僅管理員' in str(e):
+            abort(403, message=str(e))
+        else:
+            abort(400, message=str(e))
+    except RuntimeError as e:
+        abort(500, message=str(e))
 
 
 @medical_records_bp.route('/animals', methods=['GET'])
