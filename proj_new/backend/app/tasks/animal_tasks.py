@@ -365,13 +365,22 @@ def process_animal_batch_import(self, job_id: int) -> Dict[str, Any]:
         
         # === 第三階段: 處理醫療證明文件 (選填) ===
         if medical_proof_data:
-            # 處理醫療證明文件
+            # 處理醫療證明文件 - 從檔名解析 animal_code 和 record_sequence
+            import re
+            medical_filename_pattern = re.compile(r'^(.+?)_(\d+)\.[a-zA-Z]+$')
+            
             for proof in medical_proof_data:
                 stats['total_medical_proofs'] += 1
                 
                 try:
-                    animal_code = proof['animal_code']
-                    record_sequence = proof['record_sequence']
+                    filename = proof.get('filename', '')
+                    match = medical_filename_pattern.match(filename)
+                    
+                    if not match:
+                        raise ValueError(f'醫療證明檔名格式錯誤: {filename}. 正確格式: {{動物代碼}}_{{記錄序號}}.{{副檔名}}')
+                    
+                    animal_code = match.group(1)
+                    record_sequence = int(match.group(2))
                     
                     # 檢查動物是否存在
                     if animal_code not in animal_code_map:
@@ -391,13 +400,15 @@ def process_animal_batch_import(self, job_id: int) -> Dict[str, Any]:
                         filename=proof['filename'],
                         storage_key=proof['storage_key'],
                         url=proof['url'],
-                        mime_type=proof['content_type'],
-                        size=proof['size'],
+                        mime_type=proof.get('content_type'),
+                        size=proof.get('size'),
                         meta_data={
                             'animal_code': animal_code,
                             'record_sequence': record_sequence,
-                            'type': 'medical_proof'
-                        }
+                            'type': 'medical_proof',
+                            'uploaded_via': 'batch_import'
+                        },
+                        created_by=job.created_by
                     )
                     
                     db.session.add(attachment)

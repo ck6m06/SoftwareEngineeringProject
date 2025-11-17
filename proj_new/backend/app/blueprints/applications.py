@@ -208,7 +208,7 @@ def review_application(application_id):
             reviewer=current_user,
             action=action,
             review_notes=review_notes,
-            version=version
+            expected_version=version
         )
         
         return jsonify({
