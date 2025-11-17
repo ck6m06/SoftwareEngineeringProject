@@ -1,6 +1,6 @@
 """add pending_registrations table
 
-Revision ID: 20251103_add_pending_registrations
+Revision ID: 20251103_pending_reg
 Revises: 
 Create Date: 2025-11-03
 """
@@ -8,7 +8,7 @@ from alembic import op
 import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
-revision = '20251103_add_pending_registrations'
+revision = '20251103_pending_reg'
 down_revision = None
 branch_labels = None
 depends_on = None

@@ -1,0 +1,151 @@
+@startuml 申請審核作業
+title 使用案例2: 申請審核作業流程
+
+actor "送養者\n(一般會員/收容所會員)" as Reviewer
+participant "auth.py\n(Blueprint)" as Auth
+participant "applications.py\n(Blueprint)" as Applications
+participant "animals.py\n(Blueprint)" as Animals
+participant "application.py\n(Models)" as ApplicationModel
+participant "animal.py\n(Models)" as AnimalModel
+participant "notification_service.py\n(Service)" as NotificationService
+participant "email_tasks.py\n(Tasks)" as EmailTask
+database "MySQL" as DB
+queue "Redis\n(Celery)" as Redis
+
+== 先決條件: 從申請列表選擇待審核申請 ==
+note over Reviewer
+    前置步驟: 使用者在「申請列表瀏覽」(GET /api/applications?mode=review)
+    作業中選擇待審核申請 (status=PENDING)
+end note
+
+== 查看申請詳細資料 ==
+Reviewer -> Applications: GET /api/applications/{application_id}
+note right: Authorization: Bearer {token}
+
+Applications -> Auth: @jwt_required() 驗證 JWT
+Auth --> Applications: current_user_id
+
+Applications -> DB: 查詢 Application\n(application_id, deleted_at=None)
+DB --> Applications: Application 物件
+
+Applications -> DB: 查詢 Animal\n(application.animal_id)
+DB --> Applications: Animal 物件
+
+Applications -> Applications: 檢查權限
+note right
+    權限檢查:
+    1. 申請人本人 (applicant_id == current_user_id)
+    2. 動物擁有者 (owner_id == current_user_id)
+    3. 收容所成員 (shelter_id && primary_shelter_id)
+    4. 管理員 (role == ADMIN)
+end note
+
+alt 無權限
+    Applications --> Reviewer: 403 Forbidden\n「無權限查看此申請」
+else 有權限
+    Applications --> Reviewer: 返回申請詳細資料 (200)\n包含申請人資訊、動物資訊
+end
+
+== 送養者檢視申請內容與相關資料 ==
+note over Reviewer
+    送養者查看:
+    - 申請人基本資料 (contact_phone, contact_address)
+    - 申請人背景 (occupation, housing_type, has_experience)
+    - 申請原因 (reason)
+    - 其他備註 (notes)
+    - 附件資料 (attachments)
+end note
+
+== 送養者進行審核評估與填寫審核意見 ==
+note over Reviewer
+    送養者評估後:
+    - 選擇審核結果: 'approve' (核准) 或 'reject' (拒絕)
+    - 填寫審核意見 (review_notes)
+end note
+
+== 提交審核結果 ==
+Reviewer -> Applications: POST /api/applications/{application_id}/review\n{action: "approve/reject",\n review_notes: "審核意見"}
+
+Applications -> Auth: @jwt_required() 驗證
+Auth --> Applications: current_user_id
+
+Applications -> DB: 查詢 User (current_user_id)
+DB --> Applications: User 物件
+
+Applications -> DB: 查詢 Application
+DB --> Applications: Application 物件
+
+Applications -> DB: 查詢 Animal (application.animal_id)
+DB --> Applications: Animal 物件
+
+Applications -> Applications: 檢查審核權限
+note right
+    <b>重要規則:</b>
+    1. 管理員不能審核送養申請
+    2. 只有送養人或收容所成員可審核
+    
+    個人送養: owner_id == current_user_id
+    收容所動物: shelter_id && 
+                role == SHELTER_MEMBER &&
+                primary_shelter_id == animal.shelter_id
+end note
+
+alt 管理員嘗試審核
+    Applications --> Reviewer: 403 Forbidden\n「領養申請應由送養人或\n收容所成員審核,\n管理員無權審核」
+else 無權限
+    Applications --> Reviewer: 403 Forbidden\n「只有送養人或收容所成員\n可以審核此申請」
+else 申請狀態不是 PENDING/UNDER_REVIEW
+    Applications --> Reviewer: 400 Bad Request\n「此申請無法審核」
+else 有權限且狀態正確
+    alt action == "approve" (核准)
+        Applications -> ApplicationModel: 更新 status = APPROVED\nassignee_id = current_user_id\nreviewed_at = now()\nreview_notes\nversion++
+        
+        Applications -> AnimalModel: 更新動物狀態\nstatus = ADOPTED\nupdated_at = now()
+        note right: <b>核准後動物不會在公開清單</b>
+        
+        Applications -> DB: db.session.commit()
+        DB --> Applications: 確認
+        
+        Applications --> Reviewer: 200 OK\n「申請已核准」
+        
+    else action == "reject" (拒絕)
+        Applications -> ApplicationModel: 更新 status = REJECTED\nassignee_id = current_user_id\nreviewed_at = now()\nreview_notes\nversion++
+        
+        Applications -> DB: db.session.commit()
+        DB --> Applications: 確認
+        
+        Applications --> Reviewer: 200 OK\n「申請已拒絕」
+    end
+end
+
+== 系統通知使用者審核結果 ==
+Applications -> NotificationService: notify_application_reviewed(\napplication, reviewer_id,\nstatus, review_notes)
+
+NotificationService -> DB: 建立 Notification 記錄\n(recipient_id = applicant_id,\n type = 'application_approved/rejected',\n actor_id = reviewer_id)
+DB --> NotificationService: notification_id
+
+NotificationService --> Applications: 通知已建立
+
+== 發送審核結果 Email ==
+Applications -> EmailTask: send_application_notification_email_task.delay(\nrecipient_email, animal_name,\nstatus, review_notes, contact_info)
+note right
+    contact_info 包含:
+    - 個人送養: owner 的 name, email, phone
+    - 收容所動物: shelter 的 name, email, phone
+end note
+
+EmailTask -> Redis: 加入 Celery 任務佇列
+Redis --> EmailTask: task_id
+
+EmailTask --> Applications: 任務已排程
+
+note over Reviewer, Redis
+    <b>後置條件:</b>
+    - 申請狀態已更新 (APPROVED 或 REJECTED)
+    - 申請人收到站內通知
+    - 申請人收到 Email 通知 (包含送養人聯絡資訊)
+    - 若核准: 動物狀態改為 ADOPTED,不再顯示在公開清單
+    - 若拒絕: 動物維持原狀態,可供其他人申請
+end note
+
+@enduml

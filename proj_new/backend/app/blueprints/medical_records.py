@@ -12,6 +12,8 @@ from sqlalchemy import or_, and_, func
 from sqlalchemy.sql import exists
 from app.models.user import User, UserRole
 from sqlalchemy import or_
+from app.services.medical_record_service import medical_record_service
+from app.exceptions import ValidationError, NotFoundError, PermissionDeniedError
 
 medical_records_bp = Blueprint('medical_records', __name__, description='醫療紀錄 API')
 
@@ -139,109 +141,44 @@ def create_medical_record(animal_id):
     需要認證 (動物擁有者、收容所成員或管理員)
     """
     current_user_id = int(get_jwt_identity())
-    
-    # 檢查動物是否存在
-    animal = Animal.query.filter_by(animal_id=animal_id, deleted_at=None).first()
-    if not animal:
-        abort(404, message='動物不存在')
-    
-    # 檢查權限
-    user = User.query.get(current_user_id)
-    if not user:
-        abort(404, message='用戶不存在')
-    
-    # 權限檢查:
-    # 1. 管理員可以為所有動物創建醫療紀錄
-    # 2. 動物擁有者(owner_id)可以為自己的動物創建醫療紀錄
-    # 3. 收容所成員可以為所屬收容所的動物創建醫療紀錄
-    has_permission = False
-    
-    if user.role == UserRole.ADMIN:
-        has_permission = True
-    elif animal.owner_id and animal.owner_id == current_user_id:
-        # 個人送養動物：動物擁有者可以創建醫療紀錄
-        has_permission = True
-    elif animal.shelter_id and user.role == UserRole.SHELTER_MEMBER and user.primary_shelter_id == animal.shelter_id:
-        # 收容所動物：該收容所成員可以創建醫療紀錄
-        has_permission = True
-    
-    if not has_permission:
-        abort(403, message='無權限為此動物創建醫療紀錄')
-    
     data = request.get_json()
     
-    # 驗證 record_type
-    record_type = None
-    if 'record_type' in data:
-        try:
-            record_type = RecordType(data['record_type'])
-        except ValueError:
-            abort(400, message=f'無效的紀錄類型: {data["record_type"]}')
-    
-    # 驗證日期格式 - 支援多種格式
-    record_date = None
-    if 'date' in data:
-        try:
-            date_str = data['date'].strip()
-            # 嘗試多種日期格式
-            date_formats = ['%Y-%m-%d', '%Y/%m/%d', '%d/%m/%Y', '%d-%m-%Y']
-            for fmt in date_formats:
-                try:
-                    record_date = datetime.strptime(date_str, fmt).date()
-                    break
-                except ValueError:
-                    continue
-            
-            if record_date is None:
-                abort(400, message='日期格式錯誤,支援格式: YYYY-MM-DD, YYYY/MM/DD, DD/MM/YYYY, DD-MM-YYYY')
-        except Exception:
-            abort(400, message='日期格式錯誤,支援格式: YYYY-MM-DD, YYYY/MM/DD, DD/MM/YYYY, DD-MM-YYYY')
-    
-    # 創建醫療紀錄
-    medical_record = MedicalRecord(
-        animal_id=animal_id,
-        record_type=record_type,
-        date=record_date,
-        provider=data.get('provider'),
-        details=data.get('details'),
-        attachments=data.get('attachments', []),
-        verified=False,
-        created_by=current_user_id
-    )
-    
-    db.session.add(medical_record)
-    db.session.flush()  # 獲取醫療記錄 ID，但不提交事務
-    
-    # 處理附件：如果有附件，創建 Attachment 記錄
-    attachments_data = data.get('attachments', [])
-    if attachments_data and isinstance(attachments_data, list):
-        from app.models.others import Attachment
+    try:
+        # 驗證 record_type
+        record_type = None
+        if 'record_type' in data:
+            try:
+                record_type = RecordType(data['record_type'])
+            except ValueError:
+                abort(400, message=f'無效的紀錄類型: {data["record_type"]}')
         
-        for attachment_info in attachments_data:
-            if isinstance(attachment_info, dict) and 'storage_key' in attachment_info:
-                # 創建 Attachment 記錄
-                attachment = Attachment(
-                    owner_type='medical_record',
-                    owner_id=medical_record.medical_record_id,
-                    filename=attachment_info.get('filename', '未知檔案'),
-                    storage_key=attachment_info.get('storage_key'),
-                    url=attachment_info.get('url'),
-                    mime_type=attachment_info.get('mime_type'),
-                    size=attachment_info.get('size'),
-                    meta_data={
-                        'type': 'user_uploaded',
-                        'uploaded_via': 'medical_record_form'
-                    },
-                    created_by=current_user_id
-                )
-                db.session.add(attachment)
-    
-    db.session.commit()
-    
-    return jsonify({
-        'message': '醫療紀錄創建成功',
-        'medical_record': medical_record.to_dict()
-    }), 201
+        # 驗證日期格式
+        record_date = None
+        if 'date' in data:
+            record_date = medical_record_service.parse_date(data['date'])
+        
+        # 使用 service 創建醫療記錄
+        medical_record = medical_record_service.create_medical_record(
+            animal_id=animal_id,
+            current_user_id=current_user_id,
+            record_type=record_type,
+            date=record_date,
+            provider=data.get('provider'),
+            details=data.get('details'),
+            attachments_data=data.get('attachments', [])
+        )
+        
+        return jsonify({
+            'message': '醫療紀錄創建成功',
+            'medical_record': medical_record.to_dict()
+        }), 201
+        
+    except NotFoundError as e:
+        abort(404, message=str(e))
+    except PermissionDeniedError as e:
+        abort(403, message=str(e))
+    except ValidationError as e:
+        abort(400, message=str(e))
 
 
 @medical_records_bp.route('/animals/<int:animal_id>/medical-records', methods=['GET'])
@@ -249,21 +186,15 @@ def list_medical_records(animal_id):
     """
     取得動物的醫療紀錄列表 (公開端點)
     """
-    # 檢查動物是否存在
-    animal = Animal.query.filter_by(animal_id=animal_id, deleted_at=None).first()
-    if not animal:
-        abort(404, message='動物不存在')
-    
-    # 查詢醫療紀錄
-    records = MedicalRecord.query.filter_by(
-        animal_id=animal_id,
-        deleted_at=None
-    ).order_by(MedicalRecord.date.desc()).all()
-    
-    return jsonify({
-        'total': len(records),
-        'medical_records': [record.to_dict() for record in records]
-    }), 200
+    try:
+        records = medical_record_service.list_animal_medical_records(animal_id)
+        
+        return jsonify({
+            'total': len(records),
+            'medical_records': [record.to_dict() for record in records]
+        }), 200
+    except NotFoundError as e:
+        abort(404, message=str(e))
 
 
 @medical_records_bp.route('/<int:record_id>', methods=['PATCH'])
@@ -274,125 +205,44 @@ def update_medical_record(record_id):
     僅創建者、動物擁有者或管理員可更新
     """
     current_user_id = int(get_jwt_identity())
-    
-    record = MedicalRecord.query.filter_by(
-        medical_record_id=record_id,
-        deleted_at=None
-    ).first()
-    
-    if not record:
-        abort(404, message='醫療紀錄不存在')
-    
-    # 檢查權限
-    user = User.query.get(current_user_id)
-    if not user:
-        abort(404, message='用戶不存在')
-    
-    # 獲取動物資料以檢查擁有者
-    animal = Animal.query.get(record.animal_id)
-    
-    # 權限檢查: 醫療紀錄創建者、動物擁有者、或收容所成員可更新
-    # 管理員不能直接編輯醫療記錄，只能查看和驗證
-    has_permission = False
-    
-    # 管理員不能直接編輯醫療記錄（保護醫療記錄的專業性和完整性）
-    if user.role == UserRole.ADMIN:
-        has_permission = False
-    elif record.created_by == current_user_id:
-        # 醫療紀錄創建者可更新（限時24小時）
-        from datetime import datetime, timedelta
-        if record.created_at and datetime.utcnow() - record.created_at <= timedelta(hours=24):
-            has_permission = True
-    elif animal and animal.owner_id and animal.owner_id == current_user_id:
-        # 個人送養動物：動物擁有者可更新
-        has_permission = True
-    elif animal and animal.shelter_id and user.role == UserRole.SHELTER_MEMBER and user.primary_shelter_id == animal.shelter_id:
-        # 收容所動物：該收容所成員可更新
-        has_permission = True
-    
-    if not has_permission:
-        if user.role == UserRole.ADMIN:
-            abort(403, message='管理員無法直接編輯醫療記錄，請使用"標記需要修正"功能通知相關人員')
-        else:
-            abort(403, message='僅創建者(24小時內)、動物擁有者或收容所成員可更新醫療紀錄')
-    
     data = request.get_json()
     
-    # 可更新的欄位
-    if 'record_type' in data:
-        try:
-            record.record_type = RecordType(data['record_type'])
-        except ValueError:
-            abort(400, message=f'無效的紀錄類型: {data["record_type"]}')
-    
-    if 'date' in data:
-        try:
-            date_str = data['date'].strip()
-            # 嘗試多種日期格式
-            date_formats = ['%Y-%m-%d', '%Y/%m/%d', '%d/%m/%Y', '%d-%m-%Y']
-            parsed_date = None
-            for fmt in date_formats:
-                try:
-                    parsed_date = datetime.strptime(date_str, fmt).date()
-                    break
-                except ValueError:
-                    continue
-            
-            if parsed_date is None:
-                abort(400, message='日期格式錯誤,支援格式: YYYY-MM-DD, YYYY/MM/DD, DD/MM/YYYY, DD-MM-YYYY')
-            
-            record.date = parsed_date
-        except Exception:
-            abort(400, message='日期格式錯誤,支援格式: YYYY-MM-DD, YYYY/MM/DD, DD/MM/YYYY, DD-MM-YYYY')
-    
-    if 'provider' in data:
-        record.provider = data['provider']
-    
-    if 'details' in data:
-        record.details = data['details']
-    
-    if 'attachments' in data:
-        # 更新 JSON 附件數據
-        new_attachments = data['attachments']
-        existing_attachments = record.attachments or []
+    try:
+        # 解析日期格式（如果有）
+        parsed_date = None
+        if 'date' in data:
+            parsed_date = medical_record_service.parse_date(data['date'])
         
-        # 處理新附件：如果有新的附件需要創建 Attachment 記錄
-        if new_attachments and isinstance(new_attachments, list):
-            from app.models.others import Attachment
-            
-            # 檢查哪些是新附件（沒有 attachment_id 的）
-            for attachment_info in new_attachments:
-                if (isinstance(attachment_info, dict) and 
-                    'storage_key' in attachment_info and 
-                    not attachment_info.get('attachment_id')):
-                    
-                    # 這是新附件，創建 Attachment 記錄
-                    attachment = Attachment(
-                        owner_type='medical_record',
-                        owner_id=record.medical_record_id,
-                        filename=attachment_info.get('filename', '未知檔案'),
-                        storage_key=attachment_info.get('storage_key'),
-                        url=attachment_info.get('url'),
-                        mime_type=attachment_info.get('mime_type'),
-                        size=attachment_info.get('size'),
-                        meta_data={
-                            'type': 'user_uploaded',
-                            'uploaded_via': 'medical_record_form_update'
-                        },
-                        created_by=current_user_id
-                    )
-                    db.session.add(attachment)
+        # 解析 record_type（如果有）
+        record_type = None
+        if 'record_type' in data:
+            try:
+                record_type = RecordType(data['record_type'])
+            except ValueError:
+                abort(400, message=f'無效的紀錄類型: {data["record_type"]}')
         
-        # 更新 JSON 欄位（保留向後兼容性）
-        record.attachments = new_attachments
-    
-    record.updated_at = datetime.utcnow()
-    db.session.commit()
-    
-    return jsonify({
-        'message': '醫療紀錄更新成功',
-        'medical_record': record.to_dict()
-    }), 200
+        # 使用 service 更新
+        record = medical_record_service.update_medical_record(
+            record_id=record_id,
+            current_user_id=current_user_id,
+            record_type=record_type,
+            date=parsed_date,
+            provider=data.get('provider'),
+            details=data.get('details'),
+            attachments_data=data.get('attachments')
+        )
+        
+        return jsonify({
+            'message': '醫療紀錄更新成功',
+            'medical_record': record.to_dict()
+        }), 200
+        
+    except NotFoundError as e:
+        abort(404, message=str(e))
+    except PermissionDeniedError as e:
+        abort(403, message=str(e))
+    except ValidationError as e:
+        abort(400, message=str(e))
 
 
 @medical_records_bp.route('/<int:record_id>/verify', methods=['POST'])
@@ -402,29 +252,23 @@ def verify_medical_record(record_id):
     驗證醫療紀錄 (僅管理員)
     """
     current_user_id = int(get_jwt_identity())
-    
-    user = User.query.get(current_user_id)
-    if not user or user.role != UserRole.ADMIN:
-        abort(403, message='僅管理員可驗證醫療紀錄')
-    
-    record = MedicalRecord.query.filter_by(
-        medical_record_id=record_id,
-        deleted_at=None
-    ).first()
-    
-    if not record:
-        abort(404, message='醫療紀錄不存在')
-    
     data = request.get_json() or {}
     verified = data.get('verified', True)
     
-    record.verified = verified
-    record.verified_by = current_user_id if verified else None
-    record.updated_at = datetime.utcnow()
-    db.session.commit()
-    
-    return jsonify({
-        'message': f'醫療紀錄已{"驗證" if verified else "取消驗證"}',
-        'medical_record': record.to_dict()
-    }), 200
+    try:
+        record = medical_record_service.verify_medical_record(
+            record_id=record_id,
+            current_user_id=current_user_id,
+            verified=verified
+        )
+        
+        return jsonify({
+            'message': f'醫療紀錄已{"驗證" if verified else "取消驗證"}',
+            'medical_record': record.to_dict()
+        }), 200
+        
+    except NotFoundError as e:
+        abort(404, message=str(e))
+    except PermissionDeniedError as e:
+        abort(403, message=str(e))
 

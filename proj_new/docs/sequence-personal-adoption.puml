@@ -1,0 +1,333 @@
+@startuml 個人送養發佈
+title 使用案例1: 個人送養發佈流程
+
+actor "一般會員" as User
+participant "auth.py\n(Blueprint)" as Auth
+participant "animals.py\n(Blueprint)" as Animals
+participant "uploads.py\n(Blueprint)" as Uploads
+participant "medical_records.py\n(Blueprint)" as MedicalRecords
+participant "animal.py\n(Models)" as AnimalModel
+participant "medical_record.py\n(Models)" as MedicalRecordModel
+participant "others.py\n(Models)" as AttachmentModel
+participant "minio_helper.py\n(Utils)" as MinIO
+database "MySQL" as DB
+
+== 驗證會員身份 ==
+User -> Auth: POST /api/auth/login
+Auth -> DB: 驗證用戶憑證
+DB --> Auth: 返回用戶資訊
+Auth --> User: 返回 JWT Token
+
+== 填寫動物資訊並建立草稿 ==
+User -> Animals: POST /api/animals\n(包含基本資料、健康狀況、行為特徵)
+note right: Authorization: Bearer {token}\n狀態預設為 DRAFT
+
+Animals -> Auth: @jwt_required() 驗證 JWT
+Auth --> Animals: current_user_id
+
+Animals -> DB: 查詢 User (current_user_id)
+DB --> Animals: User 物件
+
+alt 一般會員
+    Animals -> AnimalModel: 建立 Animal\n(owner_id = current_user_id,\n shelter_id = NULL,\n status = DRAFT)
+else 收容所會員
+    Animals -> AnimalModel: 建立 Animal\n(owner_id = NULL,\n shelter_id = primary_shelter_id,\n status = DRAFT)
+end
+
+Animals -> DB: db.session.add(animal)\ndb.session.commit()
+DB --> Animals: animal_id
+
+Animals --> User: 返回動物資料 (201 Created)\n包含 animal_id
+
+== 上傳動物圖片 (至少1張) ==
+loop 每張圖片
+    User -> Uploads: POST /api/uploads/direct\n(multipart/form-data)
+    note right: file: 圖片檔案 (JPG/PNG/GIF)\n最大 5MB
+    
+    Uploads -> Auth: @jwt_required() 驗證
+    Auth --> Uploads: current_user_id
+    
+    Uploads -> MinIO: put_object()\n上傳圖片到 MinIO
+    MinIO --> Uploads: storage_key, public_url
+    
+    Uploads --> User: 返回 storage_key 和 url
+    
+    User -> Animals: POST /api/animals/{animal_id}/images\n(storage_key, url, mime_type)
+    
+    Animals -> Auth: @jwt_required() 驗證
+    Auth --> Animals: current_user_id
+    
+    Animals -> DB: 查詢 Animal
+    DB --> Animals: Animal 物件
+    
+    Animals -> Animals: 檢查權限\n(owner_id == current_user_id)
+    
+    Animals -> AnimalModel: 建立 AnimalImage\n(animal_id, storage_key, url, order)
+    Animals -> DB: db.session.add(image)\ndb.session.commit()
+    DB --> Animals: image_id
+    
+    Animals --> User: 返回圖片資訊 (201)
+end
+
+== 上傳醫療紀錄 ==
+loop 每筆醫療紀錄
+    User -> Uploads: POST /api/uploads/direct\n(醫療紀錄附件)
+    Uploads -> MinIO: put_object()
+    MinIO --> Uploads: storage_key, url
+    Uploads --> User: 返回 storage_key 和 url
+    
+    User -> MedicalRecords: POST /api/medical-records/animals/{animal_id}/medical-records\n(record_type, date, provider, details, attachments)
+    
+    MedicalRecords -> Auth: @jwt_required() 驗證
+    Auth --> MedicalRecords: current_user_id
+    
+    MedicalRecords -> DB: 查詢 Animal
+    DB --> MedicalRecords: Animal 物件
+    
+    MedicalRecords -> MedicalRecords: 檢查權限\n(owner_id == current_user_id)
+    
+    MedicalRecords -> MedicalRecordModel: 建立 MedicalRecord\n(animal_id, record_type, date,\n provider, details, attachments,\n verified=False, created_by)
+    
+    MedicalRecords -> DB: db.session.add(medical_record)\ndb.session.flush()
+    DB --> MedicalRecords: medical_record_id
+    
+    loop 每個附件
+        MedicalRecords -> AttachmentModel: 建立 Attachment\n(owner_type='medical_record',\n owner_id=medical_record_id,\n storage_key, filename, url)
+        MedicalRecords -> DB: db.session.add(attachment)
+    end
+    
+    MedicalRecords -> DB: db.session.commit()
+    DB --> MedicalRecords: 確認
+    
+    MedicalRecords --> User: 返回醫療紀錄 (201)
+end
+
+== 提交審核 ==
+User -> Animals: POST /api/animals/{animal_id}/submit
+note right: 將狀態從 DRAFT 改為 SUBMITTED
+
+Animals -> Auth: @jwt_required() 驗證
+Auth --> Animals: current_user_id
+
+Animals -> DB: 查詢 Animal
+DB --> Animals: Animal 物件
+
+Animals -> Animals: 檢查權限\n(owner_id == current_user_id)
+
+Animals -> Animals: 檢查狀態\n(status == DRAFT)
+
+Animals -> AnimalModel: 更新 status = SUBMITTED
+Animals -> DB: db.session.commit()
+DB --> Animals: 確認
+
+Animals --> User: 提交成功訊息 (200)\n「審核中」狀態
+
+note over User, DB
+    <b>後置條件:</b>
+    - 動物資料已存入資料庫
+    - 送養狀態設為「審核中」(SUBMITTED)
+    - 等待管理員審核 (透過 /api/animals/{id}/publish 發布)
+    - 必填欄位: 名稱、物種、性別、年齡、縣市、描述
+    - 至少1張圖片
+end note
+
+@enduml 個人送養發佈流程
+!theme plain
+skinparam backgroundColor #FFFFFF
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+
+title 個人送養發佈流程 (Personal Animal Adoption Posting)
+
+actor "一般會員\n(Owner)" as Owner
+participant "animals.py\n(Blueprint)" as AnimalsBlueprint
+participant "Animal\n(Model)" as AnimalModel
+participant "User\n(Model)" as UserModel
+participant "minio_helper.py\n(Utils)" as MinioHelper
+participant "AnimalImage\n(Model)" as ImageModel
+database "MySQL" as DB
+database "MinIO\n(Object Storage)" as MinIO
+
+== 1. 建立動物資料 (草稿狀態) ==
+
+Owner -> AnimalsBlueprint: POST /api/animals\n{name, species, breed, sex, dob, description}
+activate AnimalsBlueprint
+
+AnimalsBlueprint -> AnimalsBlueprint: @jwt_required()\n驗證 JWT Token
+AnimalsBlueprint -> UserModel: 查詢當前用戶 (get_jwt_identity)
+activate UserModel
+UserModel --> AnimalsBlueprint: User 物件
+deactivate UserModel
+
+AnimalsBlueprint -> AnimalsBlueprint: 決定動物類型\n(檢查 user.role)
+note right
+  - 如果是 SHELTER_MEMBER 且有 primary_shelter_id
+    -> shelter_id = primary_shelter_id, owner_id = None
+  - 其他情況 (GENERAL_MEMBER)
+    -> owner_id = current_user_id, shelter_id = None
+end note
+
+AnimalsBlueprint -> AnimalModel: 建立 Animal 物件\nstatus=DRAFT\nowner_id=current_user_id\ncreated_by=current_user_id
+activate AnimalModel
+AnimalModel --> AnimalsBlueprint: animal (草稿)
+deactivate AnimalModel
+
+AnimalsBlueprint -> DB: db.session.add(animal)\ndb.session.commit()
+activate DB
+DB --> AnimalsBlueprint: 成功
+deactivate DB
+
+AnimalsBlueprint --> Owner: 201 Created\n{animal: {animal_id, status: "DRAFT", ...}}
+
+deactivate AnimalsBlueprint
+
+== 2. 上傳動物圖片 ==
+
+Owner -> AnimalsBlueprint: POST /api/animals/{animal_id}/images\n{image_url: "data:image/jpeg;base64,..."}
+activate AnimalsBlueprint
+
+AnimalsBlueprint -> AnimalsBlueprint: @jwt_required()\n驗證 JWT Token
+AnimalsBlueprint -> DB: 查詢 Animal (animal_id)
+activate DB
+DB --> AnimalsBlueprint: animal
+deactivate DB
+
+AnimalsBlueprint -> AnimalsBlueprint: 權限檢查\n(animal.owner_id == current_user_id)
+note right
+  權限邏輯:
+  1. 個人送養動物: owner_id == current_user_id
+  2. 收容所動物: user.role == SHELTER_MEMBER 
+     且 user.primary_shelter_id == animal.shelter_id
+  3. 管理員: user.role == ADMIN
+end note
+
+AnimalsBlueprint -> AnimalsBlueprint: 解析 base64 圖片數據\nheader, base64_data = image_url.split(',')
+
+AnimalsBlueprint -> MinioHelper: get_minio_client()
+activate MinioHelper
+MinioHelper --> AnimalsBlueprint: minio_client
+deactivate MinioHelper
+
+AnimalsBlueprint -> MinIO: minio_client.put_object(\nbucket, storage_key, image_stream)
+activate MinIO
+MinIO --> AnimalsBlueprint: 上傳成功
+deactivate MinIO
+
+AnimalsBlueprint -> AnimalsBlueprint: 構建公開 URL\nfinal_url = "http://{MINIO_ENDPOINT}/{bucket}/{storage_key}"
+
+AnimalsBlueprint -> ImageModel: 建立 AnimalImage\n(animal_id, storage_key, url, order)
+activate ImageModel
+ImageModel --> AnimalsBlueprint: image
+deactivate ImageModel
+
+AnimalsBlueprint -> DB: db.session.add(image)\ndb.session.commit()
+activate DB
+DB --> AnimalsBlueprint: 成功
+deactivate DB
+
+AnimalsBlueprint --> Owner: 201 Created\n{image: {animal_image_id, url, ...}}
+
+deactivate AnimalsBlueprint
+
+== 3. 更新動物資料 ==
+
+Owner -> AnimalsBlueprint: PATCH /api/animals/{animal_id}\n{name, description, ...}
+activate AnimalsBlueprint
+
+AnimalsBlueprint -> AnimalsBlueprint: @jwt_required()\n驗證權限
+AnimalsBlueprint -> DB: 查詢 Animal
+activate DB
+DB --> AnimalsBlueprint: animal
+deactivate DB
+
+AnimalsBlueprint -> AnimalsBlueprint: 權限檢查\n(owner_id == current_user_id)
+AnimalsBlueprint -> AnimalsBlueprint: 更新欄位\n(name, description, species, breed, ...)
+AnimalsBlueprint -> DB: db.session.commit()
+activate DB
+DB --> AnimalsBlueprint: 成功
+deactivate DB
+
+AnimalsBlueprint --> Owner: 200 OK\n{animal: {...}}
+
+deactivate AnimalsBlueprint
+
+== 4. 提交審核 ==
+
+Owner -> AnimalsBlueprint: POST /api/animals/{animal_id}/submit
+activate AnimalsBlueprint
+
+AnimalsBlueprint -> AnimalsBlueprint: @jwt_required()\n驗證權限
+AnimalsBlueprint -> DB: 查詢 Animal
+activate DB
+DB --> AnimalsBlueprint: animal
+deactivate DB
+
+AnimalsBlueprint -> AnimalsBlueprint: 權限檢查\n(owner_id == current_user_id)
+AnimalsBlueprint -> AnimalsBlueprint: 狀態檢查\n(status == DRAFT)
+
+alt 狀態不是 DRAFT
+  AnimalsBlueprint --> Owner: 400 Bad Request\n"只能提交草稿狀態的動物"
+else 狀態是 DRAFT
+  AnimalsBlueprint -> AnimalModel: animal.status = SUBMITTED
+  activate AnimalModel
+  AnimalModel --> AnimalsBlueprint: 更新成功
+  deactivate AnimalModel
+  
+  AnimalsBlueprint -> DB: db.session.commit()
+  activate DB
+  DB --> AnimalsBlueprint: 成功
+  deactivate DB
+  
+  AnimalsBlueprint --> Owner: 200 OK\n{message: "動物已提交審核", status: "SUBMITTED"}
+end
+
+deactivate AnimalsBlueprint
+
+== 5. 管理員審核發布 (Admin) ==
+
+actor "管理員\n(Admin)" as Admin
+
+Admin -> AnimalsBlueprint: POST /api/animals/{animal_id}/publish
+activate AnimalsBlueprint
+
+AnimalsBlueprint -> AnimalsBlueprint: @jwt_required()\n驗證管理員權限
+AnimalsBlueprint -> UserModel: 查詢當前用戶
+activate UserModel
+UserModel --> AnimalsBlueprint: current_user
+deactivate UserModel
+
+AnimalsBlueprint -> AnimalsBlueprint: 檢查 user.role == ADMIN
+
+alt 不是管理員
+  AnimalsBlueprint --> Admin: 403 Forbidden\n"需要管理員權限"
+else 是管理員
+  AnimalsBlueprint -> DB: 查詢 Animal
+  activate DB
+  DB --> AnimalsBlueprint: animal
+  deactivate DB
+  
+  AnimalsBlueprint -> AnimalModel: animal.status = PUBLISHED
+  activate AnimalModel
+  AnimalModel --> AnimalsBlueprint: 更新成功
+  deactivate AnimalModel
+  
+  AnimalsBlueprint -> DB: db.session.commit()
+  activate DB
+  DB --> AnimalsBlueprint: 成功
+  deactivate DB
+  
+  AnimalsBlueprint --> Admin: 200 OK\n{message: "動物已發布", status: "PUBLISHED"}
+end
+
+deactivate AnimalsBlueprint
+
+note over Owner, MinIO
+  **架構特點 (Decouple Principles)**:
+  1. 分層架構: Blueprint (API層) -> Model (數據層) -> Database
+  2. 工具類解耦: minio_helper.py 獨立處理對象存儲邏輯
+  3. JWT 認證中介層: @jwt_required() 裝飾器統一處理認證
+  4. 權限檢查集中: Blueprint 層統一處理權限邏輯
+  5. 狀態機管理: DRAFT -> SUBMITTED -> PUBLISHED 清晰的狀態轉換
+end note
+
+@enduml

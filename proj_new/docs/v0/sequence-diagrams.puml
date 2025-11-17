@@ -1,0 +1,306 @@
+@startuml
+title 案例1: 個人送養發佈流程
+
+actor "送養人\n(User)" as User
+participant "前端\n(Frontend)" as FE
+participant "後端API\n(animals.py)" as API
+participant "資料庫\n(Database)" as DB
+participant "MinIO\n(Object Storage)" as MinIO
+participant "Notification\nService" as NS
+
+== 步驟1: 建立動物草稿 ==
+User -> FE: 填寫動物基本資料
+FE -> API: POST /api/animals\n(含JWT token)
+activate API
+
+API -> API: 驗證JWT token\n取得 current_user_id
+API -> DB: 查詢 User 資料
+DB --> API: User 資料
+
+API -> API: 判斷動物類型:\n- 一般會員 → owner_id\n- 收容所成員 → shelter_id
+API -> DB: INSERT Animal\n(status=DRAFT)
+DB --> API: animal_id
+
+API --> FE: 201 Created\n{animal_id, status: DRAFT}
+FE --> User: 顯示草稿已建立
+
+== 步驟2: 上傳動物圖片 ==
+User -> FE: 上傳動物照片
+FE -> FE: 轉換圖片為 base64
+
+loop 每張圖片
+    FE -> API: POST /api/animals/{id}/images\n{image_url: base64, mime_type}
+    activate API
+    
+    API -> API: 驗證權限\n(owner_id == current_user_id)
+    API -> API: 解析 base64 圖片
+    API -> MinIO: PUT object\n{bucket, storage_key, image_data}
+    MinIO --> API: 上傳成功
+    
+    API -> API: 構建公開 URL
+    API -> DB: INSERT AnimalImage\n{animal_id, storage_key, url, order}
+    DB --> API: image_id
+    
+    API --> FE: 201 Created\n{image_id, url}
+    deactivate API
+end
+
+FE --> User: 顯示已上傳圖片
+
+== 步驟3: 完善動物資訊 ==
+User -> FE: 編輯動物詳細資料\n(品種、年齡、描述等)
+FE -> API: PATCH /api/animals/{id}\n{name, breed, description...}
+activate API
+
+API -> API: 驗證權限
+API -> DB: UPDATE Animal
+DB --> API: 更新成功
+
+API --> FE: 200 OK\n{updated animal}
+deactivate API
+FE --> User: 資料已儲存
+
+== 步驟4: 提交審核 ==
+User -> FE: 點擊「提交審核」
+FE -> API: POST /api/animals/{id}/submit
+activate API
+
+API -> API: 驗證權限\n(owner_id == current_user_id)
+API -> DB: 檢查狀態 == DRAFT
+API -> DB: UPDATE Animal\nstatus = SUBMITTED
+DB --> API: 更新成功
+
+API --> FE: 200 OK\n{status: SUBMITTED}
+deactivate API
+FE --> User: 提示「已提交審核」
+
+== 步驟5: 管理員審核 ==
+actor "管理員\n(Admin)" as Admin
+Admin -> FE: 檢視待審核動物
+FE -> API: GET /api/animals\n?status=SUBMITTED
+API -> DB: SELECT Animals\nWHERE status = SUBMITTED
+DB --> API: 動物列表
+API --> FE: 待審核列表
+FE --> Admin: 顯示待審核動物
+
+Admin -> FE: 審核決定\n(通過/拒絕)
+
+alt 審核通過
+    Admin -> FE: 點擊「批准發布」
+    FE -> API: POST /api/animals/{id}/publish
+    activate API
+    
+    API -> API: 驗證管理員權限
+    API -> DB: UPDATE Animal\nstatus = PUBLISHED
+    DB --> API: 更新成功
+    
+    API --> FE: 200 OK\n{status: PUBLISHED}
+    deactivate API
+    FE --> Admin: 提示「已發布」
+    
+    note right of DB: 動物現在對外公開\n可接受領養申請
+
+else 審核拒絕
+    Admin -> FE: 點擊「拒絕」並輸入原因
+    FE -> API: POST /api/animals/{id}/reject\n{rejection_reason}
+    activate API
+    
+    API -> API: 驗證管理員權限
+    API -> DB: UPDATE Animal\nstatus = DRAFT,\nrejection_reason,\nrejected_at,\nrejected_by
+    DB --> API: 更新成功
+    
+    API --> FE: 200 OK\n{status: DRAFT}
+    deactivate API
+    FE --> Admin: 提示「已拒絕」
+    
+    note right of User: 送養人可查看拒絕原因\n並修改後重新提交
+end
+
+
+
+
+title 案例2: 領養申請提交流程
+
+actor "申請人\n(Applicant)" as Applicant
+actor "送養人\n(Owner)" as Owner
+participant "前端\n(Frontend)" as FE
+participant "後端API\n(applications.py)" as API
+participant "資料庫\n(Database)" as DB
+participant "Notification\nService" as NS
+participant "Celery\nWorker" as Celery
+participant "Email\nService" as Email
+
+== 步驟1: 瀏覽動物資訊 ==
+Applicant -> FE: 瀏覽可領養動物
+FE -> API: GET /api/animals\n?status=PUBLISHED
+API -> DB: SELECT Animals\nWHERE status = PUBLISHED
+DB --> API: 動物列表
+API --> FE: 已發布動物列表
+FE --> Applicant: 顯示可領養動物
+
+== 步驟2: 查看動物詳情 ==
+Applicant -> FE: 點擊動物卡片
+FE -> API: GET /api/animals/{id}
+API -> DB: SELECT Animal\nWITH images, owner
+DB --> API: 動物詳細資訊
+API --> FE: {animal, images, owner_info}
+FE --> Applicant: 顯示動物詳情頁
+
+== 步驟3: 填寫申請表單 ==
+Applicant -> FE: 點擊「申請領養」
+FE --> Applicant: 顯示申請表單
+
+Applicant -> FE: 填寫申請資料:\n- 聯絡電話\n- 地址\n- 職業\n- 居住環境\n- 飼養經驗\n- 領養原因
+FE -> FE: 驗證表單完整性
+
+== 步驟4: 提交申請 ==
+Applicant -> FE: 點擊「提交申請」
+FE -> API: POST /api/applications\n(含JWT token)\n{animal_id, contact_phone,\ncontact_address, occupation,\nhousing_type, has_experience,\nreason, notes}
+activate API
+
+API -> API: 驗證JWT token\n取得 applicant_id
+
+API -> API: 檢查用戶角色\n(只有一般會員可申請)
+alt 非一般會員
+    API --> FE: 403 Forbidden\n「只有一般會員可提出領養申請」
+    FE --> Applicant: 顯示錯誤訊息
+else 是一般會員
+    
+    API -> DB: SELECT Animal\nWHERE animal_id = ?
+    DB --> API: Animal 資料
+    
+    API -> API: 檢查動物狀態\n(必須是 PUBLISHED)
+    alt 動物已被領養或未發布
+        API --> FE: 400 Bad Request\n「此動物目前無法申請領養」
+        FE --> Applicant: 顯示錯誤訊息
+    else 動物可申請
+        
+        API -> API: 檢查申請人 != 刊登者
+        alt 申請人是刊登者本人
+            API --> FE: 400 Bad Request\n「不能申請自己刊登的動物」
+            FE --> Applicant: 顯示錯誤訊息
+        else 非本人
+            
+            API -> DB: SELECT Application\nWHERE animal_id = ?\nAND status IN (PENDING, UNDER_REVIEW)
+            DB --> API: 查詢結果
+            
+            alt 已有其他人的待審核申請
+                API --> FE: 409 Conflict\n「此動物有待審核申請」
+                FE --> Applicant: 提示等待
+            else 可以申請
+                
+                API -> DB: SELECT Application\nWHERE animal_id = ?\nAND applicant_id = ?\nAND status IN (PENDING, UNDER_REVIEW, APPROVED)
+                DB --> API: 查詢結果
+                
+                alt 已提交過申請
+                    API --> FE: 409 Conflict\n「已對此動物提交申請」
+                    FE --> Applicant: 提示重複申請
+                else 首次申請
+                    
+                    API -> DB: INSERT Application\n(animal_id, applicant_id,\nstatus=PENDING,\nsubmitted_at=NOW(),\ncontact_phone, address,\noccupation, housing_type,\nhas_experience, reason)
+                    DB --> API: application_id
+                    
+                    API -> DB: COMMIT
+                    
+                    API --> FE: 201 Created\n{application_id, status: PENDING}
+                    deactivate API
+                    FE --> Applicant: 「申請已提交」
+                    
+                    == 步驟5: 發送通知 ==
+                    API -> NS: notify_application_submitted(\napplication, applicant_name, animal_name)
+                    activate NS
+                    
+                    NS -> DB: 查詢動物擁有者\n(owner_id 或 shelter primary_account_user_id)
+                    DB --> NS: recipient_id
+                    
+                    NS -> DB: INSERT Notification\n(recipient_id, type='application_submitted',\nactor_id=applicant_id,\npayload={application_id, animal_name})
+                    DB --> NS: notification_id
+                    
+                    NS --> API: 通知已建立
+                    deactivate NS
+                    
+                    note right of Owner: 送養人收到通知\n可在前端查看
+                end
+            end
+        end
+    end
+end
+
+== 步驟6: 送養人審核申請 ==
+Owner -> FE: 登入並查看通知
+FE -> API: GET /api/notifications
+API -> DB: SELECT Notifications\nWHERE recipient_id = owner_id
+DB --> API: 通知列表
+API --> FE: 通知列表
+FE --> Owner: 顯示「新的領養申請」
+
+Owner -> FE: 點擊通知\n查看申請詳情
+FE -> API: GET /api/applications/{id}
+API -> DB: SELECT Application\nWITH applicant, animal
+DB --> API: 申請完整資訊
+API --> FE: {application, applicant_info,\nanimal_info}
+FE --> Owner: 顯示申請詳情
+
+Owner -> FE: 審核決定
+
+alt 核准申請
+    Owner -> FE: 點擊「核准」
+    FE -> API: POST /api/applications/{id}/review\n{action: 'approve'}
+    activate API
+    
+    API -> API: 驗證權限\n(owner_id == current_user_id\nOR 收容所成員)
+    API -> DB: UPDATE Application\nstatus = APPROVED,\nreviewed_at = NOW(),\nassignee_id = owner_id,\nversion++
+    
+    API -> DB: UPDATE Animal\nstatus = ADOPTED
+    
+    DB --> API: 更新成功
+    
+    API -> NS: notify_application_reviewed(\napplication, owner_id,\nstatus='APPROVED')
+    activate NS
+    
+    NS -> DB: INSERT Notification\n(recipient_id=applicant_id,\ntype='application_approved')
+    deactivate NS
+    
+    API -> Celery: send_application_notification_email_task.delay(\napplicant_email, animal_name,\nstatus='approved',\ncontact_info={owner/shelter})
+    activate Celery
+    
+    Celery -> Email: 發送核准通知郵件\n(包含送養人聯絡資訊)
+    Email --> Applicant: 📧 領養申請已通過
+    deactivate Celery
+    
+    API --> FE: 200 OK\n{status: APPROVED}
+    deactivate API
+    FE --> Owner: 「已核准申請」
+    
+    note right of Applicant: 申請人收到通知和郵件\n可聯絡送養人安排見面
+
+else 拒絕申請
+    Owner -> FE: 點擊「拒絕」\n並輸入原因
+    FE -> API: POST /api/applications/{id}/review\n{action: 'reject',\nreview_notes: '原因'}
+    activate API
+    
+    API -> API: 驗證權限
+    API -> DB: UPDATE Application\nstatus = REJECTED,\nreviewed_at = NOW(),\nreview_notes,\nassignee_id = owner_id,\nversion++
+    DB --> API: 更新成功
+    
+    API -> NS: notify_application_reviewed(\napplication, owner_id,\nstatus='REJECTED')
+    activate NS
+    
+    NS -> DB: INSERT Notification\n(recipient_id=applicant_id,\ntype='application_rejected')
+    deactivate NS
+    
+    API -> Celery: send_application_notification_email_task.delay(\napplicant_email, animal_name,\nstatus='rejected',\nmessage=review_notes)
+    activate Celery
+    
+    Celery -> Email: 發送拒絕通知郵件
+    Email --> Applicant: 📧 領養申請未通過
+    deactivate Celery
+    
+    API --> FE: 200 OK\n{status: REJECTED}
+    deactivate API
+    FE --> Owner: 「已拒絕申請」
+    
+    note right of Applicant: 申請人收到通知\n可查看拒絕原因
+    note right of DB: 動物狀態保持 PUBLISHED\n其他人可繼續申請
+end
+@enduml

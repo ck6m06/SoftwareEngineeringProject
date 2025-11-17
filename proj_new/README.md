@@ -135,7 +135,7 @@ docker-compose up -d
 timeout 15  # Windows: timeout /t 15
 
 # 初始化資料庫（首次啟動時）
-docker-compose exec backend flask db upgrade
+docker-compose exec backend flask db current
 # 如遇到遷移問題，執行：
 # docker-compose exec backend flask db stamp f024b1dbf16b
 
