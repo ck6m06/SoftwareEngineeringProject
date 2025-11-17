@@ -1,0 +1,192 @@
+@startuml PetAdoptionSwimLane
+title Pet Adoption Platform - Business Process Swimlane Diagram
+
+!theme plain
+skinparam backgroundColor white
+skinparam swimlane {
+    BorderColor Blue
+    TitleBackgroundColor LightBlue
+}
+skinparam activity {
+    BackgroundColor LightYellow
+    BorderColor Blue
+}
+
+|#LightBlue|訪客/用戶|
+start
+:訪問平台首頁;
+:瀏覽動物列表;
+
+if (需要申請領養?) then (是)
+  :點擊註冊按鈕;
+  
+  |#LightGreen|前端應用|
+  :顯示註冊表單;
+  :驗證表單輸入;
+  
+  |#LightCyan|後端API|
+  :POST /auth/register;
+  :驗證Email唯一性;
+  :bcrypt加密密碼;
+  :創建User記錄;
+  :生成驗證Token;
+  
+  |#Pink|背景任務|
+  :Celery發送驗證郵件;
+  
+  |#LightBlue|訪客/用戶|
+  :收到驗證郵件;
+  :點擊驗證鏈接;
+  
+  |#LightCyan|後端API|
+  :GET /auth/verify?token=...;
+  :標記用戶已驗證;
+  
+  |#LightBlue|訪客/用戶|
+  :登入系統;
+  
+  |#LightGreen|前端應用|
+  :POST /auth/login;
+  
+  |#LightCyan|後端API|
+  :驗證用戶憑證;
+  :發放JWT Token;
+  
+  |#LightBlue|訪客/用戶|
+  :獲得認證狀態;
+  
+else (否)
+  :繼續瀏覽;
+endif
+
+:選擇感興趣的動物;
+:查看動物詳情;
+
+|#Orange|動物擁有者|
+:決定送養動物;
+
+|#LightGreen|前端應用|
+:填寫送養表單;
+:上傳動物照片;
+
+|#LightCyan|後端API|
+:POST /animals;
+:創建動物記錄;
+:狀態設為DRAFT;
+
+|#Pink|背景任務|
+:處理圖片上傳;
+:生成縮略圖;
+
+|#LightCyan|後端API|
+:提交審核;
+:狀態更新為SUBMITTED;
+
+|#Yellow|管理員|
+:審核動物資料;
+if (審核結果) then (通過)
+  :狀態更新為PUBLISHED;
+else (不通過)
+  :狀態更新為REJECTED;
+  :記錄拒絕原因;
+endif
+
+|#LightBlue|訪客/用戶|
+if (對動物感興趣?) then (是)
+  :點擊申請領養;
+  
+  |#LightGreen|前端應用|
+  :填寫領養申請表單;
+  :包含個人資料;
+  :領養動機說明;
+  :飼養經驗;
+  
+  |#LightCyan|後端API|
+  :POST /applications;
+  :驗證申請資格;
+  :檢查重複申請;
+  :創建Application記錄;
+  :狀態設為PENDING;
+  
+  |#Pink|背景任務|
+  :發送申請通知;
+  :給動物擁有者;
+  
+else (否)
+  :繼續瀏覽其他動物;
+endif
+
+|#Orange|動物擁有者|
+:收到申請通知;
+:查看申請詳情;
+:評估申請者資料;
+
+if (審核決定) then (批准)
+  |#LightGreen|前端應用|
+  :POST /applications/{id}/review;
+  
+  |#LightCyan|後端API|
+  :更新狀態為APPROVED;
+  :記錄審核意見;
+  :創建審計日誌;
+  :動物狀態更新為ADOPTED;
+  
+  |#Pink|背景任務|
+  :發送批准通知;
+  :給申請者;
+  
+  |#LightBlue|訪客/用戶|
+  :收到批准通知;
+  :安排面談/交接;
+  
+  |#Orange|動物擁有者|
+  :完成領養交接;
+  
+else (拒絕)
+  |#LightCyan|後端API|
+  :更新狀態為REJECTED;
+  :記錄拒絕原因;
+  
+  |#Pink|背景任務|
+  :發送拒絕通知;
+  
+  |#LightBlue|訪客/用戶|
+  :收到拒絕通知;
+  :可申請其他動物;
+endif
+
+|#Yellow|管理員|
+:監控平台活動;
+:查看審計日誌;
+:處理用戶申訴;
+
+|#LightCyan|後端API|
+:記錄所有操作;
+:維護數據一致性;
+
+|#Lavender|數據庫|
+:MySQL存儲核心數據;
+:Redis緩存會話;
+:MinIO存儲圖片;
+
+stop
+
+note right of start
+  主要參與者：
+  • 訪客/用戶 (GENERAL_MEMBER)
+  • 動物擁有者 (GENERAL_MEMBER/SHELTER_MEMBER)  
+  • 管理員 (ADMIN)
+  • 系統組件 (前端/後端/背景任務/數據庫)
+end note
+
+note bottom
+  關鍵業務流程：
+  1. 用戶註冊與認證
+  2. 動物送養發布與審核
+  3. 領養申請提交
+  4. 申請審核與批准/拒絕
+  5. 背景任務處理 (郵件、圖片處理)
+  6. 審計追蹤與監控
+end note
+
+@enduml

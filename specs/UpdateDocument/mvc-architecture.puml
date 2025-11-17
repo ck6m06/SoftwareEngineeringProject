@@ -1,0 +1,157 @@
+@startuml MVCArchitecture
+title Pet Adoption Platform - MVC Architecture
+
+!theme plain
+skinparam packageStyle rectangle
+skinparam component {
+  BackgroundColor LightBlue
+  BorderColor Blue
+  ArrowColor DarkBlue
+}
+
+package "Frontend (Vue 3 + Vite)" as Frontend {
+  package "View Layer" as View {
+    component [Home.vue] as Home
+    component [Animals.vue] as Animals
+    component [AnimalDetail.vue] as AnimalDetail
+    component [Login.vue] as Login
+    component [Register.vue] as Register
+    component [MyApplications.vue] as MyApplications
+    component [MyRehomes.vue] as MyRehomes
+    component [AdminDashboard.vue] as AdminDashboard
+    component [ShelterDashboard.vue] as ShelterDashboard
+  }
+  
+  package "Frontend Controllers" as FrontendController {
+    component [Router] as Router
+    component [API Services] as APIServices
+    component [Stores (Pinia)] as Stores
+    component [Composables] as Composables
+  }
+}
+
+package "Backend (Flask + SQLAlchemy)" as Backend {
+  package "Controller Layer" as Controller {
+    component [Auth Blueprint] as AuthController
+    component [Users Blueprint] as UsersController
+    component [Animals Blueprint] as AnimalsController
+    component [Applications Blueprint] as ApplicationsController
+    component [Admin Blueprint] as AdminController
+    component [Shelters Blueprint] as SheltersController
+    component [Medical Records Blueprint] as MedicalController
+    component [Notifications Blueprint] as NotificationsController
+    component [Uploads Blueprint] as UploadsController
+    component [Jobs Blueprint] as JobsController
+  }
+  
+  package "Service Layer (Business Logic)" as Service {
+    component [Auth Service] as AuthService
+    component [Email Service] as EmailService
+    component [Notification Service] as NotificationService
+    component [Audit Service] as AuditService
+  }
+  
+  package "Model Layer" as Model {
+    component [User Model] as UserModel
+    component [Animal Model] as AnimalModel
+    component [Application Model] as ApplicationModel
+    component [Shelter Model] as ShelterModel
+    component [Medical Record Model] as MedicalModel
+    component [Audit Log Model] as AuditModel
+    component [Job Model] as JobModel
+    component [Notification Model] as NotificationModel
+  }
+}
+
+package "Data Layer" as Data {
+  database [MySQL Database] as Database
+  component [Redis Cache] as Redis
+  component [MinIO Object Storage] as MinIO
+}
+
+' Frontend MVC relationships
+View --> FrontendController : User Interactions
+FrontendController --> View : Data Updates
+Router --> View : Route Navigation
+Stores --> View : State Management
+APIServices --> Backend : HTTP Requests
+
+' Backend MVC relationships
+Controller --> Service : Business Logic
+Service --> Model : Data Operations
+Model --> Data : Persistence
+
+' Specific controller mappings
+AuthController --> AuthService
+UsersController --> UserModel
+AnimalsController --> AnimalModel
+ApplicationsController --> ApplicationModel
+AdminController --> Service
+SheltersController --> ShelterModel
+MedicalController --> MedicalModel
+NotificationsController --> NotificationService
+UploadsController --> MinIO
+JobsController --> JobModel
+
+' Service to Model relationships
+AuthService --> UserModel
+EmailService --> NotificationModel
+NotificationService --> NotificationModel
+AuditService --> AuditModel
+
+' Model to Data relationships
+UserModel --> Database
+AnimalModel --> Database
+ApplicationModel --> Database
+ShelterModel --> Database
+MedicalModel --> Database
+AuditModel --> Database
+JobModel --> Database
+NotificationModel --> Database
+
+' External storage
+UploadsController --> MinIO : File Storage
+NotificationService --> Redis : Caching
+JobsController --> Redis : Queue Management
+
+note top of Frontend
+  Vue 3 Components act as Views
+  Pinia Stores manage state
+  API Services handle HTTP communication
+end note
+
+note top of Backend
+  Flask Blueprints act as Controllers
+  Service layer contains business logic
+  SQLAlchemy models represent data
+end note
+
+note bottom of Data
+  MySQL for relational data
+  Redis for caching and job queues
+  MinIO for file storage
+  
+  Database Relationships:
+  • User（管理者）對 Shelter 為一對多（User 可管理多個 Shelter）
+  • Shelter 對 User 為一對多（多位 User 可指向同一 Shelter，作為主要所屬）
+  • Shelter 對 Animal 為一對多（收容所可能有多隻動物）
+  • User（owner）對 Animal 為一對多（ownerId）
+  • User（created_by）對 Animal 為一對多（建立者）
+  • User（rejected_by）對 Animal 為一對多（拒絕審核者）
+  • Animal 對 AnimalImages 為一對多，圖片為子資源
+  • User（applicant）對 Applications 為一對多（申請者）
+  • Animal 對 Applications 為一對多（被申請動物）
+  • User（assignee）對 Applications 為一對多（審核者）
+  • Animal 對 MedicalRecords 為一對多（醫療記錄）
+  • User（verified_by）對 MedicalRecords 為一對多（驗證者）
+  • User（created_by）對 MedicalRecords 為一對多（建立者）
+  • User（recipient）對 Notifications 為一對多（接收者）
+  • User（actor）對 Notifications 為一對多（執行者）
+  • User（created_by）對 Jobs 為一對多（任務建立者）
+  • User（actor）對 AuditLogs 為一對多（操作者）
+  • Shelter 對 AuditLogs 為一對多（相關收容所）
+  • User（created_by）對 Attachments 為一對多（上傳者）
+  • MedicalRecord/Application 對 Attachments 為一對多（polymorphic）
+end note
+
+@enduml

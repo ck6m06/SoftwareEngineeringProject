@@ -1,0 +1,225 @@
+﻿@startuml PetAdoptionMVC
+title 寵物領養平台 - MVC 架構圖
+
+!theme plain
+skinparam backgroundColor white
+skinparam component {
+    BackgroundColor LightBlue
+    BorderColor Blue
+    FontSize 11
+}
+skinparam package {
+    BackgroundColor LightGray
+    BorderColor Black
+    FontStyle bold
+}
+skinparam note {
+    BackgroundColor LightYellow
+    BorderColor Orange
+}
+
+package "Frontend (Vue.js)" as frontend {
+    
+    package "View Layer" as view_layer {
+        [Home.vue] as home
+        [Login.vue] as login
+        [Register.vue] as register
+        [Animals.vue] as animals_list
+        [AnimalDetail.vue] as animal_detail
+        [MyApplications.vue] as my_apps
+        [ApplicationReview.vue] as app_review
+        [MedicalRecords.vue] as medical
+        [UserProfile.vue] as profile
+        [AdminDashboard.vue] as admin
+        [ShelterDashboard.vue] as shelter
+        [NotificationCenter.vue] as notifications
+    }
+    
+    package "State Management (Pinia)" as state_mgmt {
+        [auth.ts] as auth_store
+    }
+    
+    package "API Client" as api_client {
+        [client.ts] as api_base
+        [auth.ts] as auth_api
+        [animals.ts] as animals_api
+        [applications.ts] as apps_api
+        [users.ts] as users_api
+    }
+    
+    package Router as vue_router {
+        [index.ts] as router
+    }
+}
+
+package `"Backend (Flask)`" as backend {
+    
+    package `"View Layer (API Endpoints)`" as view_layer_backend {
+        [auth.py] as auth_view
+        [users.py] as users_view
+        [animals.py] as animals_view
+        [applications.py] as apps_view
+        [medical_records.py] as medical_view
+        [shelters.py] as shelters_view
+        [notifications.py] as notif_view
+        [uploads.py] as uploads_view
+        [jobs.py] as jobs_view
+        [admin.py] as admin_view
+    }
+    
+    package `"Controller Layer (Services)`" as controller_layer {
+        [email_service.py] as email_ctrl
+        [audit_service.py] as audit_ctrl  
+        [notification_service.py] as notif_ctrl
+    }
+    
+    package "Model Layer (SQLAlchemy)" as model_layer {
+        [User] as user_model
+        [Animal] as animal_model
+        [Application] as app_model
+        [MedicalRecord] as medical_model
+        [Shelter] as shelter_model
+        [Notification] as notif_model
+        [Job] as job_model
+        [AuditLog] as audit_model
+        [PendingRegistration] as pending_model
+    }
+    
+    package "Utils & Middleware" as utils_layer {
+        [security.py] as security_utils
+        [decorators.py] as decorators
+        [validators.py] as validators
+    }
+}
+
+package "Database Layer" as db_layer {
+    database MySQL as mysql_db
+    database "Redis Cache" as redis_cache
+    storage "MinIO Object Storage" as minio_storage
+}
+
+package "Background Tasks" as background {
+    [Celery Workers] as celery
+    [Tasks Queue] as task_queue
+}
+
+' Frontend View to State Management
+home --> auth_store
+login --> auth_store
+register --> auth_store
+animals_list --> auth_store
+my_apps --> auth_store
+profile --> auth_store
+admin --> auth_store
+
+' Frontend View to API Client
+login --> auth_api
+register --> auth_api
+animals_list --> animals_api
+animal_detail --> animals_api
+my_apps --> apps_api
+app_review --> apps_api
+medical --> apps_api
+profile --> users_api
+notifications --> apps_api
+
+' API Client to Backend Views
+auth_api --> auth_view : `"HTTP/JSON REST API`"
+animals_api --> animals_view
+apps_api --> apps_view
+users_api --> users_view
+
+' Views to Controllers (Services)
+auth_view --> email_ctrl
+auth_view --> audit_ctrl
+apps_view --> notif_ctrl
+uploads_view --> audit_ctrl
+
+' Controllers to Models
+email_ctrl --> user_model
+audit_ctrl --> audit_model
+notif_ctrl --> notif_model
+
+' Views to Models (Direct Data Access)
+auth_view --> user_model
+auth_view --> pending_model
+users_view --> user_model
+animals_view --> animal_model
+apps_view --> app_model
+medical_view --> medical_model
+shelters_view --> shelter_model
+admin_view --> user_model
+admin_view --> audit_model
+
+' Models to Database
+user_model --> mysql_db
+animal_model --> mysql_db
+app_model --> mysql_db
+medical_model --> mysql_db
+shelter_model --> mysql_db
+notif_model --> mysql_db
+job_model --> mysql_db
+audit_model --> mysql_db
+pending_model --> mysql_db
+
+' Cache Layer
+auth_view --> redis_cache : `"Session & JWT`"
+animals_view --> redis_cache : `"Query Cache`"
+
+' Object Storage
+uploads_view --> minio_storage : `"File Upload`"
+
+' Background Tasks
+auth_view --> celery : `"Email Tasks`"
+apps_view --> celery : `"Notification Tasks`"
+uploads_view --> celery : `"Image Processing`"
+
+' Router connections
+router --> home
+router --> login
+router --> animals_list
+router --> animal_detail
+
+note top of frontend
+  前端 MVC 特點:
+   View: Vue.js 單文件組件
+   Controller: Pinia狀態管理 + API Client
+   Model: API響應的資料模型
+   響應式數據綁定
+   組件化開發模式
+end note
+
+note bottom of backend
+  後端 MVC 特點:
+   View: Flask Blueprint API端點 (HTTP請求/響應處理)
+   Controller: Service Layer業務邏輯控制器
+   Model: SQLAlchemy ORM資料模型
+   RESTful API設計原則
+   JSON格式的API響應
+end note
+
+note right of state_mgmt
+  Vue狀態管理:
+  - 用戶認證狀態
+  - Token管理
+  - 用戶資訊快取
+end note
+
+note right of service_layer
+  業務邏輯服務:
+  - 郵件發送
+  - 審計日誌
+  - 通知推送
+  - 可重複使用
+end note
+
+note right of db_layer
+  資料層:
+   主要資料: MySQL
+   快取層: Redis
+   檔案儲存: MinIO
+   關聯資料庫設計
+   支援事務處理
+end note
+
+@enduml

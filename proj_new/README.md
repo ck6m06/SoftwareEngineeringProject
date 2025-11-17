@@ -7,32 +7,42 @@
 ## 技術架構
 
 ### 前端 (Frontend)
-- **框架**: Vue 3.4.21 + TypeScript 5.x + Vite 5.4.21
-- **狀態管理**: Pinia 2.x
-- **路由管理**: Vue Router 4.x (含角色型路由守衛)
-- **表單驗證**: vee-validate + zod
-- **UI 框架**: Tailwind CSS 3.x
-- **日期處理**: date-fns (含 i18n zh-TW)
-- **HTTP 客戶端**: Axios
-- **圖片上傳**: 自定義 FileUploader 組件
+- **框架**: Vue 3.4.21 + TypeScript 5.x + Vite 5.1.6
+- **狀態管理**: Pinia 2.1.7
+- **路由管理**: Vue Router 4.3.0 (含角色型路由守衛)
+- **表單驗證**: vee-validate 4.12.5 + zod 3.22.4
+- **UI 框架**: Tailwind CSS 3.4.1
+- **日期處理**: date-fns 4.1.0
+- **HTTP 客戶端**: Axios 1.6.7
+- **數據查詢**: TanStack Vue Query 5.28.4
+- **測試框架**: Vitest + Playwright
+- **代碼品質**: ESLint + Prettier
 
 ### 後端 (Backend)
-- **框架**: Flask 3.0.0 + flask-smorest (OpenAPI)
-- **ORM**: SQLAlchemy 2.x
-- **遷移工具**: Alembic
-- **認證**: JWT (flask-jwt-extended)
-- **任務隊列**: Celery 5.x
-- **消息隊列**: Redis 7.x
+- **框架**: Flask 3.0.0 + flask-smorest 0.42.3 (OpenAPI)
+- **ORM**: SQLAlchemy 2.0.23 + Alembic 1.13.0
+- **認證**: JWT (flask-jwt-extended 4.5.3)
+- **任務隊列**: Celery 5.3.4
+- **消息隊列**: Redis 5.0.1
+- **安全加密**: bcrypt 4.1.2 + argon2-cffi 23.1.0
+- **文件存儲**: MinIO 7.2.0 + boto3 1.34.12
+- **限流保護**: Flask-Limiter 3.5.0
+- **監控追蹤**: Sentry SDK 1.39.1
+- **測試框架**: pytest 7.4.3 + pytest-flask
 - **API 文檔**: Swagger UI / ReDoc
 
 ### 資料庫與儲存
-- **資料庫**: MySQL 8.0+ (InnoDB)
+- **關聯資料庫**: MySQL 8.0+ (InnoDB 引擎)
   - 支援軟刪除機制 (deleted_at)
-  - 完整的外鍵約束
-  - 審計日誌記錄
-- **物件儲存**: MinIO (S3 相容)
-- **快取**: Redis 7.x
-- **會話管理**: Redis (Flask Session)
+  - 完整的外鍵約束與索引優化
+  - 審計日誌與操作追蹤
+- **對象存儲**: MinIO (S3 兼容 API)
+  - 圖片與附件文件存儲
+  - 分桶管理與權限控制
+- **緩存系統**: Redis 7.x
+  - 會話管理 (Flask Session)
+  - Celery 任務隊列
+  - 應用層緩存
 
 ## 專案結構
 
@@ -41,64 +51,93 @@ proj_new/
 ├── backend/              # Flask 後端應用
 │   ├── app/             # 應用主目錄
 │   │   ├── blueprints/  # API 路由模組
-│   │   │   ├── auth.py          # 身份驗證
+│   │   │   ├── auth.py          # 身份驗證與授權
 │   │   │   ├── animals.py       # 動物管理
-│   │   │   ├── applications.py  # 申請管理
+│   │   │   ├── applications.py  # 領養申請管理
+│   │   │   ├── admin.py         # 管理員功能
+│   │   │   ├── jobs.py          # 背景任務管理
+│   │   │   ├── medical_records.py # 醫療紀錄
 │   │   │   ├── notifications.py # 通知系統
-│   │   │   ├── jobs.py          # 任務管理
 │   │   │   ├── shelters.py      # 收容所管理
-│   │   │   └── admin.py         # 管理員功能
-│   │   ├── models/      # SQLAlchemy 模型
+│   │   │   ├── uploads.py       # 檔案上傳
+│   │   │   └── users.py         # 用戶管理
+│   │   ├── models/      # SQLAlchemy 數據模型
 │   │   │   ├── user.py          # 用戶模型
 │   │   │   ├── animal.py        # 動物模型
 │   │   │   ├── application.py   # 申請模型
-│   │   │   └── others.py        # 其他模型
-│   │   ├── services/    # 業務邏輯層
-│   │   │   └── notification_service.py  # 通知服務
-│   │   ├── utils/       # 工具函數
+│   │   │   ├── medical_record.py # 醫療紀錄模型
+│   │   │   ├── shelter.py       # 收容所模型
+│   │   │   ├── pending_registration.py # 待註冊模型
+│   │   │   └── others.py        # 其他輔助模型
+│   │   ├── services/    # 業務邏輯服務層
+│   │   │   ├── email_service.py    # 郵件服務
+│   │   │   ├── notification_service.py # 通知服務
+│   │   │   └── audit_service.py    # 審計服務
+│   │   ├── tasks/       # Celery 背景任務
+│   │   ├── templates/   # Jinja2 郵件模板
+│   │   ├── utils/       # 工具函數庫
 │   │   └── __init__.py  # Flask 應用工廠
-│   ├── migrations/      # Alembic 遷移檔案
-│   ├── config.py        # 設定檔
-│   ├── requirements.txt # Python 依賴
-│   └── run.py           # 應用入口
+│   ├── migrations/      # Alembic 數據庫遷移檔案
+│   ├── scripts/         # 部署與維護腳本
+│   ├── tests/           # 後端單元測試
+│   ├── config.py        # 應用配置檔
+│   ├── requirements.txt # Python 依賴清單
+│   └── run.py           # 應用啟動入口
 ├── frontend/            # Vue 3 前端應用
 │   ├── src/
 │   │   ├── api/         # API 客戶端模組
-│   │   │   ├── client.ts        # Axios 客戶端
-│   │   │   ├── animals.ts       # 動物 API
-│   │   │   ├── applications.ts  # 申請 API
-│   │   │   ├── notifications.ts # 通知 API
-│   │   │   └── jobs.ts          # 任務 API
-│   │   ├── assets/      # 靜態資源
-│   │   ├── components/  # Vue 組件
+│   │   │   ├── client.ts        # Axios HTTP 客戶端
+│   │   │   ├── animals.ts       # 動物相關 API
+│   │   │   ├── applications.ts  # 申請相關 API
+│   │   │   ├── jobs.ts          # 任務相關 API
+│   │   │   ├── medicalRecords.ts # 醫療紀錄 API
+│   │   │   ├── shelters.ts      # 收容所 API
+│   │   │   ├── uploads.ts       # 檔案上傳 API
+│   │   │   ├── users.ts         # 用戶管理 API
+│   │   │   └── auditLogs.ts     # 審計日誌 API
+│   │   ├── components/  # Vue 可重用組件
 │   │   │   ├── layout/          # 佈局組件
-│   │   │   ├── uploads/         # 上傳組件
-│   │   │   └── NotificationBell.vue  # 通知鈴鐺
+│   │   │   ├── uploads/         # 檔案上傳組件
+│   │   │   └── common/          # 通用 UI 組件
 │   │   ├── composables/ # Composition API 邏輯
-│   │   │   ├── useNotifications.ts  # 通知邏輯
-│   │   │   └── useUpload.ts     # 上傳邏輯
-│   │   ├── pages/       # 頁面組件
-│   │   │   ├── Animals.vue          # 動物列表
-│   │   │   ├── AnimalDetail.vue     # 動物詳情
-│   │   │   ├── RehomeForm.vue       # 送養表單
-│   │   │   ├── MyRehomes.vue        # 我的送養
-│   │   │   ├── AdminUsers.vue       # 用戶管理
-│   │   │   ├── Jobs.vue             # 任務列表
-│   │   │   └── NotificationCenter.vue  # 通知中心
-│   │   ├── router/      # 路由設定
-│   │   │   └── index.ts         # 路由配置 (含角色守衛)
+│   │   │   ├── useNotifications.ts # 通知邏輯
+│   │   │   ├── useUpload.ts    # 檔案上傳邏輯
+│   │   │   └── useAuth.ts      # 認證邏輯
+│   │   ├── pages/       # 頁面路由組件
+│   │   │   ├── Animals.vue          # 動物列表頁面
+│   │   │   ├── AnimalDetail.vue     # 動物詳情頁面
+│   │   │   ├── RehomeForm.vue       # 送養表單頁面
+│   │   │   ├── MyRehomes.vue        # 我的送養管理
+│   │   │   ├── ApplicationReview.vue # 申請審核頁面
+│   │   │   ├── MedicalRecords.vue   # 醫療紀錄頁面
+│   │   │   ├── AdminDashboard.vue   # 管理員控制台
+│   │   │   ├── AdminUsers.vue       # 用戶管理頁面
+│   │   │   ├── ShelterDashboard.vue # 收容所控制台
+│   │   │   ├── Jobs.vue             # 任務列表頁面
+│   │   │   ├── AuditLogs.vue        # 審計日誌頁面
+│   │   │   └── NotificationCenter.vue # 通知中心
+│   │   ├── router/      # 路由配置
+│   │   │   └── index.ts         # 路由定義 (含角色守衛)
 │   │   ├── stores/      # Pinia 狀態管理
-│   │   │   └── auth.ts          # 認證狀態
+│   │   │   └── auth.ts          # 認證狀態管理
 │   │   ├── types/       # TypeScript 類型定義
 │   │   └── App.vue      # 根組件
-│   ├── package.json
-│   └── vite.config.ts
-├── docker/              # Docker 相關檔案
-│   ├── backend.Dockerfile
-│   ├── frontend.Dockerfile
-│   └── nginx.conf
-├── docker-compose.yml   # Docker Compose 設定
-├── docs/                # 專案文檔
+│   ├── package.json     # Node.js 依賴配置
+│   ├── vite.config.ts   # Vite 建構配置
+│   ├── tailwind.config.js # Tailwind CSS 配置
+│   └── tsconfig.json    # TypeScript 配置
+├── docker/              # Docker 容器化檔案
+│   ├── backend.Dockerfile    # 後端容器定義
+│   ├── frontend.Dockerfile  # 前端容器定義
+│   └── nginx.conf           # Nginx 反向代理配置
+├── docker-compose.yml   # Docker Compose 多服務編排
+├── docs/                # 專案技術文檔
+│   ├── api/             # API 文檔
+│   └── development.md   # 開發指南
+├── TEST_ACCOUNTS.md     # 測試帳號說明文檔
+├── CREATE_TEST_ACCOUNTS_GUIDE.md # 測試帳號建立指南
+└── README.md            # 專案說明文檔
+```
 │   ├── api/
 │   │   └── README.md    # API 使用指南
 │   └── development.md   # 開發指南

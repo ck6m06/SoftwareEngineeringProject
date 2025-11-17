@@ -1,0 +1,291 @@
+@startuml PetAdoptionSystemArchitecture
+!theme toy
+skinparam backgroundColor #F8FAFC
+skinparam roundCorner 15
+skinparam shadowing false
+
+' Define colors for better visual organization
+!define PRIMARY_COLOR #3B82F6
+!define SECONDARY_COLOR #10B981
+!define ACCENT_COLOR #F59E0B
+!define DANGER_COLOR #EF4444
+!define NEUTRAL_COLOR #6B7280
+
+title 貓狗領養平台 - 系統架構圖\n(Modern 3-Tier Architecture - NOT Traditional MVC)
+
+' ======================================
+' PRESENTATION LAYER (Frontend)
+' ======================================
+package "📱 Presentation Layer" as presentation_layer <<Frontend>> {
+  
+  rectangle "Vue 3 SPA Application" as vue_app #PRIMARY_COLOR {
+    component "🏠 Pages & Views" as pages {
+      portin " " as pages_in
+      portout " " as pages_out
+    }
+    component "🧩 Components" as components {
+      portin " " as comp_in
+      portout " " as comp_out
+    }
+    component "🗂️ Pinia Stores" as stores {
+      portin " " as store_in
+      portout " " as store_out
+    }
+    component "🔄 TanStack Query" as query {
+      portin " " as query_in
+      portout " " as query_out
+    }
+    component "🛣️ Vue Router" as router {
+      portin " " as router_in
+      portout " " as router_out
+    }
+  }
+  
+  rectangle "Development Toolchain" as dev_tools #NEUTRAL_COLOR {
+    component "⚡ Vite (Build Tool)" as vite
+    component "📘 TypeScript" as typescript
+    component "🎨 Tailwind CSS" as tailwind
+    component "🧪 Testing (Vitest/Playwright)" as testing
+  }
+  
+  rectangle "HTTP Client Layer" as http_layer #SECONDARY_COLOR {
+    component "📡 Axios HTTP Client" as axios
+    component "🔐 JWT Token Manager" as token_manager
+    component "📋 API Type Definitions" as api_types
+  }
+}
+
+' ======================================
+' NETWORK BOUNDARY
+' ======================================
+cloud "🌐 Network Layer\n(HTTPS/REST API)" as network_boundary {
+  component "🔒 SSL/TLS Encryption" as ssl
+  component "⚡ Rate Limiting" as rate_limit
+  component "🛡️ CORS Policy" as cors
+}
+
+' ======================================
+' APPLICATION LAYER (Backend)
+' ======================================
+package "🏗️ Application Layer" as application_layer <<Backend>> {
+  
+  rectangle "Flask API Gateway" as api_gateway #SECONDARY_COLOR {
+    component "📜 OpenAPI Specification\n(flask-smorest)" as openapi
+    component "🗺️ Blueprint Routes" as blueprints
+    component "🔑 JWT Authentication" as jwt_auth
+    component "🚨 Error Handling" as error_handling
+    component "📊 Request Validation" as validation
+  }
+  
+  rectangle "Business Services Layer" as services #PRIMARY_COLOR {
+    component "👤 User Service" as user_service {
+      portout " " as user_out
+    }
+    component "🐕 Animal Service" as animal_service {
+      portout " " as animal_out
+    }
+    component "📝 Application Service" as app_service {
+      portout " " as app_out
+    }
+    component "🏥 Medical Service" as medical_service {
+      portout " " as medical_out
+    }
+    component "🏠 Shelter Service" as shelter_service {
+      portout " " as shelter_out
+    }
+    component "📤 Upload Service" as upload_service {
+      portout " " as upload_out
+    }
+    component "🔔 Notification Service" as notification_service {
+      portout " " as notification_out
+    }
+    component "📋 Audit Service" as audit_service {
+      portout " " as audit_out
+    }
+  }
+  
+  rectangle "Background Processing" as background #ACCENT_COLOR {
+    component "⚙️ Celery Workers" as celery_workers {
+      portin " " as celery_in
+      portout " " as celery_out
+    }
+    component "📋 Task Scheduler" as scheduler {
+      portout " " as scheduler_out
+    }
+    component "📊 Job Monitor" as job_monitor {
+      portin " " as monitor_in
+    }
+    component "📧 Email Worker" as email_worker {
+      portout " " as email_out
+    }
+  }
+  
+  rectangle "Data Access Layer" as data_access #SECONDARY_COLOR {
+    component "🗄️ SQLAlchemy ORM" as sqlalchemy {
+      portout " " as orm_out
+    }
+    component "🔄 Database Migrations\n(Alembic)" as migrations
+    component "🔄 Connection Pool" as connection_pool
+    component "📝 Query Optimizer" as query_optimizer
+  }
+}
+
+' ======================================
+' DATA LAYER
+' ======================================
+package "💾 Data Layer" as data_layer <<Storage>> {
+  
+  database "MySQL 8.0 Database" as mysql_db #DANGER_COLOR {
+    rectangle "Core Tables" as core_tables {
+      component "👥 users" as users_table
+      component "🏠 shelters" as shelters_table
+      component "🐕 animals" as animals_table
+      component "📷 animalImages" as images_table
+    }
+    rectangle "Application Tables" as app_tables {
+      component "📝 applications" as applications_table
+      component "🏥 medicalRecords" as medical_table
+      component "📎 attachments" as attachments_table
+    }
+    rectangle "System Tables" as sys_tables {
+      component "🔔 notifications" as notifications_table
+      component "⚙️ jobs" as jobs_table
+      component "📋 auditLogs" as audit_table
+      component "⏳ pendingRegistrations" as pending_table
+    }
+  }
+  
+  database "Redis Cache & Queue" as redis_db #ACCENT_COLOR {
+    component "🗄️ Session Store" as session_store
+    component "📋 Task Queue" as task_queue
+    component "⚡ API Cache" as api_cache
+    component "🔔 Real-time Data" as realtime_cache
+  }
+  
+  cloud "MinIO Object Storage" as object_storage #SECONDARY_COLOR {
+    component "📷 Animal Images" as stored_images {
+      portout " " as images_out
+    }
+    component "📄 Medical Documents" as medical_docs {
+      portout " " as docs_out
+    }
+    component "📎 Application Files" as app_files {
+      portout " " as files_out
+    }
+    component "💾 Backup Files" as backup_files
+  }
+}
+
+' ======================================
+' EXTERNAL SERVICES
+' ======================================
+cloud "🌍 External Services" as external_services #NEUTRAL_COLOR {
+  component "📧 Email Service\n(SMTP)" as email_service
+  component "📱 SMS Gateway" as sms_service  
+  component "🚀 CDN Service" as cdn_service
+  component "📊 Monitoring & Logging\n(Sentry)" as monitoring_service
+  component "🔐 Security Scanner" as security_service
+}
+
+' ======================================
+' DATA FLOW CONNECTIONS
+' ======================================
+
+' Frontend to Backend
+pages_out --> network_boundary : "User Interactions"
+query_out --> network_boundary : "API Requests"
+axios --> network_boundary : "HTTP Calls"
+
+' Network to Backend
+network_boundary --> api_gateway : "Validated Requests"
+
+' Backend Internal Flow
+api_gateway --> services : "Route to Services"
+services --> data_access : "Data Operations"
+services --> background : "Async Tasks"
+
+' Data Access to Storage
+sqlalchemy --> mysql_db : "Database Queries"
+data_access --> redis_db : "Cache Operations"
+upload_service --> object_storage : "File Operations"
+
+' Background Processing
+celery_workers --> services : "Execute Business Logic"
+celery_workers --> redis_db : "Task Management"
+scheduler_out --> task_queue : "Schedule Tasks"
+
+' External Service Integration
+notification_out --> email_service : "Send Notifications"
+notification_out --> sms_service : "SMS Alerts"
+api_gateway --> monitoring_service : "Logging & Metrics"
+stored_images --> cdn_service : "Content Delivery"
+
+' Feedback Loops
+job_monitor --> network_boundary : "Job Status Updates"
+images_out --> network_boundary : "Media Content"
+
+' ======================================
+' ARCHITECTURAL NOTES
+' ======================================
+
+note top of presentation_layer
+  **前端特色:**
+  • Single Page Application (SPA)
+  • Component-based Architecture  
+  • Reactive State Management
+  • Type-safe Development
+  • Modern Build Toolchain
+end note
+
+note bottom of application_layer  
+  **後端特色:**
+  • RESTful API Design
+  • Service-Oriented Architecture
+  • Async Background Processing
+  • Database ORM Abstraction
+  • Comprehensive Error Handling
+end note
+
+note right of data_layer
+  **資料層特色:**
+  • ACID Transaction Support
+  • High-Performance Caching
+  • Scalable Object Storage
+  • Data Backup & Recovery
+  • Multi-model Data Storage
+end note
+
+note left of external_services
+  **整合服務:**
+  • Email/SMS Notifications
+  • CDN for Media Delivery
+  • Real-time Monitoring
+  • Security & Compliance
+  • Third-party APIs
+end note
+
+note as architecture_note
+  **架構說明:**
+  此系統採用現代化三層式架構，
+  不同於傳統 MVC 的單體設計：
+  
+  ✅ 前後端完全分離
+  ✅ API 優先設計
+  ✅ 微服務化組件
+  ✅ 異步處理能力
+  ✅ 容器化部署
+end note
+
+' ======================================
+' LEGEND
+' ======================================
+legend bottom center
+  |= Color |= Component Type |
+  | <size:12><back:#3B82F6>     </back></size> | Core Application Logic |
+  | <size:12><back:#10B981>     </back></size> | API Gateway & Storage |
+  | <size:12><back:#F59E0B>     </back></size> | Cache & Background Jobs |
+  | <size:12><back:#EF4444>     </back></size> | Primary Database |
+  | <size:12><back:#6B7280>     </back></size> | External & Dev Tools |
+endlegend
+
+@enduml

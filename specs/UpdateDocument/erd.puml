@@ -1,0 +1,279 @@
+@startuml ERD_PetAdoption
+' 寵物收養平台實體關係圖
+
+' ERD 樣式設定
+skinparam entity {
+    BackgroundColor #FFFACD
+    BorderColor #000000
+    FontSize 11
+    FontStyle bold
+}
+
+skinparam note {
+    BackgroundColor #FFE4E1
+    BorderColor #800080
+    FontSize 10
+}
+
+' 設定關聯線樣式
+skinparam arrow {
+    Color #000000
+    Thickness 1
+}
+
+' === 核心實體 ===
+
+entity "users" as users {
+    + user_id : BIGINT <<PK>>
+    --
+    * email : VARCHAR(320) <<UK>>
+    username : VARCHAR(150)
+    phone_number : VARCHAR(32)
+    first_name : VARCHAR(120)
+    last_name : VARCHAR(120)
+    region : VARCHAR(100)
+    address : JSON
+    * role : ENUM
+    * verified : BOOLEAN
+    primary_shelter_id : BIGINT <<FK>>
+    profile_photo_url : VARCHAR(1024)
+    settings : JSON
+    * password_hash : VARCHAR(255)
+    password_changed_at : DATETIME
+    last_login_at : DATETIME
+    * failed_login_attempts : INT
+    locked_until : DATETIME
+    * created_at : DATETIME
+    * updated_at : DATETIME
+    deleted_at : DATETIME
+}
+
+entity "pending_registrations" as pending_registrations {
+    + pending_id : INT <<PK>>
+    --
+    * email : VARCHAR(320) <<UK>>
+    username : VARCHAR(150)
+    phone_number : VARCHAR(32)
+    region : VARCHAR(100)
+    address : JSON
+    * password_hash : VARCHAR(255)
+    * verification_code_hash : VARCHAR(255)
+    * code_expires_at : DATETIME
+    * attempts : INT
+    * resend_count : INT
+    client_ip : VARCHAR(45)
+    user_agent : VARCHAR(1024)
+    * created_at : DATETIME
+    * updated_at : DATETIME
+}
+
+entity "shelters" as shelters {
+    + shelter_id : BIGINT <<PK>>
+    --
+    * name : VARCHAR(255)
+    slug : VARCHAR(255) <<UK>>
+    * contact_email : VARCHAR(320)
+    * contact_phone : VARCHAR(32)
+    * address : JSON
+    region : VARCHAR(100)
+    * verified : BOOLEAN
+    primary_account_user_id : BIGINT <<FK>>
+    * created_at : DATETIME
+    * updated_at : DATETIME
+    deleted_at : DATETIME
+}
+
+entity "animals" as animals {
+    + animal_id : BIGINT <<PK>>
+    --
+    name : VARCHAR(200)
+    species : ENUM
+    breed : VARCHAR(200)
+    color : VARCHAR(100)
+    sex : ENUM
+    dob : DATE
+    description : TEXT
+    * status : ENUM
+    shelter_id : BIGINT <<FK>>
+    owner_id : BIGINT <<FK>>
+    medical_summary : TEXT
+    rejection_reason : TEXT
+    rejected_at : DATETIME
+    rejected_by : BIGINT <<FK>>
+    * created_by : BIGINT <<FK>>
+    * created_at : DATETIME
+    * updated_at : DATETIME
+    deleted_at : DATETIME
+}
+
+entity "animal_images" as animal_images {
+    + animal_image_id : BIGINT <<PK>>
+    --
+    * animal_id : BIGINT <<FK>>
+    * storage_key : VARCHAR(1024)
+    * url : VARCHAR(2048)
+    mime_type : VARCHAR(128)
+    width : INT
+    height : INT
+    * order : INT
+    * created_at : DATETIME
+}
+
+entity "applications" as applications {
+    + application_id : BIGINT <<PK>>
+    --
+    * applicant_id : BIGINT <<FK>>
+    * animal_id : BIGINT <<FK>>
+    * type : ENUM
+    * status : ENUM
+    submitted_at : DATETIME
+    reviewed_at : DATETIME
+    review_notes : TEXT
+    assignee_id : BIGINT <<FK>>
+    * version : INT
+    idempotency_key : VARCHAR(255) <<UK>>
+    attachments : JSON
+    contact_phone : VARCHAR(32)
+    contact_address : VARCHAR(500)
+    occupation : VARCHAR(100)
+    housing_type : VARCHAR(50)
+    has_experience : BOOLEAN
+    reason : TEXT
+    notes : TEXT
+    * created_at : DATETIME
+    * updated_at : DATETIME
+    deleted_at : DATETIME
+}
+
+entity "medical_records" as medical_records {
+    + medical_record_id : BIGINT <<PK>>
+    --
+    * animal_id : BIGINT <<FK>>
+    record_type : ENUM
+    date : DATE
+    provider : VARCHAR(255)
+    details : TEXT
+    attachments : JSON
+    * verified : BOOLEAN
+    verified_by : BIGINT <<FK>>
+    created_by : BIGINT <<FK>>
+    * created_at : DATETIME
+    * updated_at : DATETIME
+    deleted_at : DATETIME
+}
+
+entity "attachments" as attachments {
+    + attachment_id : BIGINT <<PK>>
+    --
+    * owner_type : VARCHAR(64)
+    * owner_id : BIGINT
+    * storage_key : VARCHAR(1024)
+    * url : VARCHAR(2048)
+    filename : VARCHAR(1024)
+    mime_type : VARCHAR(128)
+    size : INT
+    meta_data : JSON
+    created_by : BIGINT <<FK>>
+    * created_at : DATETIME
+    deleted_at : DATETIME
+}
+
+entity "notifications" as notifications {
+    + notification_id : BIGINT <<PK>>
+    --
+    * recipient_id : BIGINT <<FK>>
+    actor_id : BIGINT <<FK>>
+    * type : VARCHAR(128)
+    payload : JSON
+    * read : BOOLEAN
+    * created_at : DATETIME
+    read_at : DATETIME
+}
+
+entity "jobs" as jobs {
+    + job_id : BIGINT <<PK>>
+    --
+    * type : VARCHAR(320)
+    * status : ENUM
+    payload : JSON
+    result_summary : JSON
+    created_by : BIGINT <<FK>>
+    * created_at : DATETIME
+    started_at : DATETIME
+    finished_at : DATETIME
+    * attempts : INT
+}
+
+entity "audit_logs" as audit_logs {
+    + audit_log_id : BIGINT <<PK>>
+    --
+    actor_id : BIGINT <<FK>>
+    * action : VARCHAR(150)
+    target_type : VARCHAR(128)
+    target_id : BIGINT
+    shelter_id : BIGINT <<FK>>
+    before_state : JSON
+    after_state : JSON
+    * timestamp : DATETIME
+}
+
+' === 關聯關係 ===
+
+' 核心業務關聯
+users ||--o{ shelters : "primary_account_user_id"
+shelters ||--o{ users : "primary_shelter_id"
+
+users ||--o{ animals : "created_by"
+users ||--o{ animals : "owner_id"
+users ||--o{ animals : "rejected_by"
+shelters ||--o{ animals : "shelter_id"
+
+animals ||--o{ animal_images : "animal_id"
+
+' 申請流程關聯  
+users ||--o{ applications : "applicant_id"
+animals ||--o{ applications : "animal_id"
+users ||--o{ applications : "assignee_id"
+
+' 醫療記錄關聯
+animals ||--o{ medical_records : "animal_id"
+users ||--o{ medical_records : "verified_by"
+users ||--o{ medical_records : "created_by"
+
+' 支援系統關聯
+users ||--o{ attachments : "created_by"
+users ||--o{ notifications : "recipient_id"
+users ||--o{ notifications : "actor_id"
+users ||--o{ jobs : "created_by"
+users ||--o{ audit_logs : "actor_id"
+shelters ||--o{ audit_logs : "shelter_id"
+
+' === 圖表佈局 ===
+
+' 核心實體組
+users -[hidden]- shelters
+shelters -[hidden]- animals
+animals -[hidden]- applications
+
+' 支援實體組  
+animal_images -[hidden]- medical_records
+attachments -[hidden]- notifications
+jobs -[hidden]- audit_logs
+
+' 註釋
+note top of pending_registrations : "臨時註冊表\\n驗證完成後清除"
+note right of attachments : "多型附件\\n支援多種實體"
+note bottom of applications : "完整申請流程\\n包含審核機制"
+note left of animals : "動物管理\\n支援收養狀態"
+
+' 圖例
+legend bottom right
+  |= 符號 |= 說明 |
+  | <<PK>> | 主鍵 |
+  | <<FK>> | 外鍵 |
+  | <<UK>> | 唯一鍵 |
+  | * | 必填欄位 |
+  | ||--o{ | 一對多關係 |
+endlegend
+
+@enduml

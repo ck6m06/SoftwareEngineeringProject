@@ -1,0 +1,216 @@
+erDiagram
+    %% 寵物收養平台實體關係圖 - Mermaid版本 (與實際實現一致)
+    
+    %% 核心實體定義
+    USERS {
+        BIGINT user_id PK "主鍵"
+        VARCHAR email UK "唯一信箱"
+        VARCHAR username "使用者名稱"
+        VARCHAR phone_number "電話號碼"
+        VARCHAR first_name "名字"
+        VARCHAR last_name "姓氏"
+        VARCHAR region "地區"
+        JSON address "地址JSON"
+        ENUM role "角色(GENERAL_MEMBER/SHELTER_MEMBER/ADMIN)"
+        BOOLEAN verified "是否已驗證"
+        BIGINT primary_shelter_id FK "主要收容所ID"
+        VARCHAR profile_photo_url "頭像網址"
+        JSON settings "設定JSON"
+        VARCHAR password_hash "密碼雜湊"
+        DATETIME password_changed_at "密碼變更時間"
+        DATETIME last_login_at "最後登入時間"
+        INT failed_login_attempts "失敗登入次數"
+        DATETIME locked_until "鎖定到期時間"
+        DATETIME created_at "創建時間"
+        DATETIME updated_at "更新時間"
+        DATETIME deleted_at "刪除時間"
+    }
+    
+    PENDING_REGISTRATIONS {
+        INT pending_id PK "主鍵"
+        VARCHAR email UK "唯一信箱"
+        VARCHAR username "使用者名稱"
+        VARCHAR phone_number "電話號碼"
+        VARCHAR region "地區"
+        JSON address "地址JSON"
+        VARCHAR password_hash "密碼雜湊"
+        VARCHAR verification_code_hash "驗證碼雜湊"
+        DATETIME code_expires_at "驗證碼過期時間"
+        INT attempts "驗證嘗試次數"
+        INT resend_count "重發次數"
+        VARCHAR client_ip "客戶端IP"
+        VARCHAR user_agent "用戶代理"
+        DATETIME created_at "創建時間"
+        DATETIME updated_at "更新時間"
+    }
+    
+    SHELTERS {
+        BIGINT shelter_id PK "主鍵"
+        VARCHAR name "收容所名稱"
+        VARCHAR slug UK "網址別名"
+        VARCHAR contact_email "聯絡信箱"
+        VARCHAR contact_phone "聯絡電話"
+        JSON address "地址JSON"
+        VARCHAR region "地區"
+        BOOLEAN verified "是否已驗證"
+        BIGINT primary_account_user_id FK "主要帳號用戶ID"
+        DATETIME created_at "創建時間"
+        DATETIME updated_at "更新時間"
+        DATETIME deleted_at "刪除時間"
+    }
+    
+    ANIMALS {
+        BIGINT animal_id PK "主鍵"
+        VARCHAR name "動物名稱"
+        ENUM species "物種(DOG/CAT)"
+        VARCHAR breed "品種"
+        VARCHAR color "毛色"
+        ENUM sex "性別(MALE/FEMALE/UNKNOWN)"
+        DATE dob "出生日期"
+        TEXT description "描述"
+        ENUM status "狀態(DRAFT/SUBMITTED/PUBLISHED/ADOPTED/RETIRED)"
+        BIGINT shelter_id FK "收容所ID"
+        BIGINT owner_id FK "擁有者ID"
+        TEXT medical_summary "醫療摘要"
+        TEXT rejection_reason "拒絕原因"
+        DATETIME rejected_at "拒絕時間"
+        BIGINT rejected_by FK "拒絕者ID"
+        BIGINT created_by FK "創建者ID"
+        DATETIME created_at "創建時間"
+        DATETIME updated_at "更新時間"
+        DATETIME deleted_at "刪除時間"
+    }
+    
+    ANIMAL_IMAGES {
+        BIGINT animal_image_id PK "主鍵"
+        BIGINT animal_id FK "動物ID"
+        VARCHAR storage_key "儲存鍵"
+        VARCHAR url "圖片網址"
+        VARCHAR mime_type "MIME類型"
+        INT width "圖片寬度"
+        INT height "圖片高度"
+        INT order "顯示順序"
+        DATETIME created_at "創建時間"
+    }
+    
+    APPLICATIONS {
+        BIGINT application_id PK "主鍵"
+        BIGINT applicant_id FK "申請人ID"
+        BIGINT animal_id FK "動物ID"
+        ENUM type "申請類型(ADOPTION/REHOME)"
+        ENUM status "狀態(PENDING/UNDER_REVIEW/APPROVED/REJECTED/WITHDRAWN)"
+        DATETIME submitted_at "提交時間"
+        DATETIME reviewed_at "審核時間"
+        TEXT review_notes "審核備註"
+        BIGINT assignee_id FK "指派審核員ID"
+        INT version "版本號"
+        VARCHAR idempotency_key UK "冪等性鍵"
+        JSON attachments "附件JSON"
+        VARCHAR contact_phone "聯絡電話"
+        VARCHAR contact_address "聯絡地址"
+        VARCHAR occupation "職業"
+        VARCHAR housing_type "住宅類型"
+        BOOLEAN has_experience "是否有經驗"
+        TEXT reason "申請原因"
+        TEXT notes "備註"
+        DATETIME created_at "創建時間"
+        DATETIME updated_at "更新時間"
+        DATETIME deleted_at "刪除時間"
+    }
+    
+    MEDICAL_RECORDS {
+        BIGINT medical_record_id PK "主鍵"
+        BIGINT animal_id FK "動物ID"
+        ENUM record_type "記錄類型(TREATMENT/CHECKUP/VACCINE/SURGERY/OTHER)"
+        DATE date "記錄日期"
+        VARCHAR provider "醫療提供者"
+        TEXT details "詳細描述"
+        JSON attachments "附件JSON"
+        BOOLEAN verified "是否已驗證"
+        BIGINT verified_by FK "驗證者ID"
+        BIGINT created_by FK "創建者ID"
+        DATETIME created_at "創建時間"
+        DATETIME updated_at "更新時間"
+        DATETIME deleted_at "刪除時間"
+    }
+    
+    ATTACHMENTS {
+        BIGINT attachment_id PK "主鍵"
+        VARCHAR owner_type "擁有者類型"
+        BIGINT owner_id "擁有者ID"
+        VARCHAR storage_key "儲存鍵"
+        VARCHAR url "檔案網址"
+        VARCHAR filename "檔案名稱"
+        VARCHAR mime_type "MIME類型"
+        INT size "檔案大小"
+        JSON meta_data "元數據"
+        BIGINT created_by FK "創建者ID"
+        DATETIME created_at "創建時間"
+        DATETIME deleted_at "刪除時間"
+    }
+    
+    NOTIFICATIONS {
+        BIGINT notification_id PK "主鍵"
+        BIGINT recipient_id FK "接收者ID"
+        BIGINT actor_id FK "操作者ID"
+        VARCHAR type "通知類型"
+        JSON payload "通知數據"
+        BOOLEAN read "是否已讀"
+        DATETIME created_at "創建時間"
+        DATETIME read_at "已讀時間"
+    }
+    
+    JOBS {
+        BIGINT job_id PK "主鍵"
+        VARCHAR type "任務類型"
+        ENUM status "狀態(PENDING/RUNNING/SUCCEEDED/FAILED)"
+        JSON payload "任務數據"
+        JSON result_summary "結果摘要"
+        BIGINT created_by FK "創建者ID"
+        DATETIME created_at "創建時間"
+        DATETIME started_at "開始時間"
+        DATETIME finished_at "完成時間"
+        INT attempts "嘗試次數"
+    }
+    
+    AUDIT_LOGS {
+        BIGINT audit_log_id PK "主鍵"
+        BIGINT actor_id FK "操作者ID"
+        VARCHAR action "操作動作"
+        VARCHAR target_type "目標類型"
+        BIGINT target_id "目標ID"
+        BIGINT shelter_id FK "收容所ID"
+        JSON before_state "變更前狀態"
+        JSON after_state "變更後狀態"
+        DATETIME timestamp "時間戳"
+    }
+    
+    %% 關聯關係定義
+    
+    %% 核心業務關聯
+    USERS ||--o{ SHELTERS : "manages"
+    SHELTERS ||--o{ USERS : "primary_shelter"
+    
+    %% 動物管理關聯
+    SHELTERS ||--o{ ANIMALS : "houses"
+    USERS ||--o{ ANIMALS : "creates"
+    USERS ||--o{ ANIMALS : "rejects"
+    ANIMALS ||--o{ ANIMAL_IMAGES : "has_images"
+    
+    %% 申請流程關聯
+    USERS ||--o{ APPLICATIONS : "submits"
+    ANIMALS ||--o{ APPLICATIONS : "applied_for"
+    USERS ||--o{ APPLICATIONS : "reviews"
+    
+    %% 醫療記錄關聯
+    ANIMALS ||--o{ MEDICAL_RECORDS : "has_records"
+    USERS ||--o{ MEDICAL_RECORDS : "verifies"
+    USERS ||--o{ MEDICAL_RECORDS : "creates_record"
+    
+    %% 系統支援關聯
+    USERS ||--o{ ATTACHMENTS : "uploads"
+    USERS ||--o{ NOTIFICATIONS : "receives"
+    USERS ||--o{ NOTIFICATIONS : "triggers"
+    USERS ||--o{ JOBS : "creates_job"
+    USERS ||--o{ AUDIT_LOGS : "performs_action"
+    SHELTERS ||--o{ AUDIT_LOGS : "context"

@@ -1,0 +1,207 @@
+@startuml SystemArchitecture
+title Pet Adoption Platform - System Architecture
+
+!theme plain
+
+skinparam cloud {
+  BackgroundColor LightGreen
+  BorderColor Green
+}
+skinparam node {
+  BackgroundColor LightBlue
+  BorderColor Blue
+}
+skinparam database {
+  BackgroundColor LightYellow
+  BorderColor Orange
+}
+
+' ============================
+' Client Layer
+' ============================
+cloud "Client Devices" as ClientDevices {
+  actor Users
+  actor Admins
+  actor Shelters
+}
+
+' ============================
+' Load Balancer
+' ============================
+node "Load Balancer / Reverse Proxy" as LoadBalancer
+component "Nginx" as Nginx
+LoadBalancer -- Nginx
+
+' ============================
+' Frontend Tier
+' ============================
+node "Frontend Tier" as FrontendTier
+component "Vue 3 SPA" as Frontend
+
+note right of Frontend
+  - Vue 3 + TypeScript
+  - Vite Build Tool
+  - Pinia State Management
+  - Vue Router
+  - Tailwind CSS
+  - Port: 5173
+end note
+
+' ============================
+' Backend Tier
+' ============================
+node "Backend Tier" as BackendTier
+component "Flask API Server" as Backend
+component "Celery Worker" as CeleryWorker
+
+note right of Backend
+  - Flask + Flask-SMOREST
+  - SQLAlchemy ORM
+  - JWT Authentication
+  - OpenAPI/Swagger
+  - CORS Enabled
+  - Port: 5000
+end note
+
+note right of CeleryWorker
+  - Async Task Processing
+  - Email Notifications
+  - Batch Operations
+  - File Processing
+end note
+
+' ============================
+' Data Tier
+' ============================
+node "Data Tier" as DataTier
+database "MySQL Database" as MySQL
+database "Redis Cache" as Redis
+database "MinIO Object Storage" as MinIO
+
+note right of MySQL
+  - Primary Database
+  - User Data
+  - Animal Records
+  - Applications
+  - Audit Logs
+  - Port: 3307 -> 3306
+  
+  Key Relationships:
+  • USERS ||--o{ SHELTERS : "primary_account_user_id (管理)"
+  • SHELTERS ||--o{ USERS : "primary_shelter_id (所屬)"
+  • SHELTERS ||--o{ ANIMALS : "shelter_id (收容)"
+  • USERS ||--o{ ANIMALS : "owner_id (擁有)"
+  • USERS ||--o{ ANIMALS : "created_by (建立)"
+  • ANIMALS ||--o{ ANIMAL_IMAGES : "animal_id (圖片)"
+  • USERS ||--o{ APPLICATIONS : "applicant_id (申請)"
+  • ANIMALS ||--o{ APPLICATIONS : "animal_id (被申請)"
+  • ANIMALS ||--o{ MEDICAL_RECORDS : "animal_id (醫療記錄)"
+  • USERS ||--o{ NOTIFICATIONS : "recipient_id (接收)"
+  • USERS ||--o{ AUDIT_LOGS : "actor_id (操作者)"
+end note
+
+note right of Redis
+  - Session Store
+  - Task Queue (Celery)
+  - Caching Layer
+  - Rate Limiting
+  - Port: 6379
+end note
+
+note right of MinIO
+  - Object Storage
+  - Animal Photos
+  - Medical Documents
+  - User Avatars
+  - File Metadata
+  - Port: 9000 (API)
+  - Port: 9001 (Console)
+end note
+
+' ============================
+' External Services
+' ============================
+cloud "SMTP Server" as SMTP
+cloud "Email Provider" as EmailProvider
+
+note right of SMTP
+  - Email Notifications
+  - User Verification
+  - Password Reset
+  - Application Updates
+end note
+
+' ============================
+' Monitoring
+' ============================
+node "Monitoring & Observability" as Monitoring
+component "Health Endpoints" as Health
+component "Metrics Endpoint" as Metrics
+component "Logging" as Logging
+
+note right of Health
+  /healthz - Health Check
+  /readyz - Readiness Check
+  /metrics - Prometheus Metrics
+end note
+
+' ============================
+' Connections
+' ============================
+
+' Client connections
+Users --> LoadBalancer : HTTPS
+Admins --> LoadBalancer : HTTPS
+Shelters --> LoadBalancer : HTTPS
+
+' Load balancer routing
+LoadBalancer --> Frontend : Serve static files
+LoadBalancer --> Backend : API requests
+
+' Frontend to Backend
+Frontend --> Backend : REST API (HTTP/JSON)
+
+' Backend to Data Tier
+Backend --> MySQL : SQLAlchemy Queries
+Backend --> Redis : Sessions / Cache
+Backend --> MinIO : File Storage (S3 API)
+
+' Celery worker connections
+CeleryWorker --> MySQL : DB Access
+CeleryWorker --> Redis : Task Queue
+CeleryWorker --> MinIO : File Processing
+CeleryWorker --> SMTP : Email Delivery
+
+' External service flow
+Backend --> SMTP : Send Emails
+SMTP --> EmailProvider : Relay
+
+' Monitoring
+Backend --> Health
+Backend --> Metrics
+Backend --> Logging
+
+' ============================
+' Docker network note (replaced package for compatibility)
+' ============================
+note top
+  Docker Network: pet-adoption-network
+  - All services run in Docker containers.
+  - Internal communication via Docker network.
+  - External access through exposed ports.
+end note
+
+' ============================
+' Security Note
+' ============================
+note bottom of BackendTier
+  Security Features:
+  - JWT Authentication
+  - CORS Configuration
+  - Input Validation
+  - SQL Injection Prevention
+  - File Upload Validation
+  - Rate Limiting
+end note
+
+@enduml
