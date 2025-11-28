@@ -24,113 +24,29 @@ def list_animals_for_medical_records():
     """
     獲取當前用戶有權限管理醫療紀錄的動物列表
     """
-    current_user_id = int(get_jwt_identity())
-    user = User.query.get(current_user_id)
-    
-    if not user:
-        abort(404, message='用戶不存在')
-    
-    # 基本查詢：排除已刪除的動物
-    query = Animal.query.filter_by(deleted_at=None)
-    
-    if user.role == UserRole.ADMIN:
-        # 管理員可以看到所有動物
-        pass
-    elif user.role == UserRole.SHELTER_MEMBER:
-        # 收容所成員可以看到：
-        # 1. 自己擁有的動物 (個人送養)
-        # 2. 所屬收容所的動物
-        conditions = [Animal.owner_id == current_user_id]
-        if user.primary_shelter_id:
-            conditions.append(Animal.shelter_id == user.primary_shelter_id)
-        query = query.filter(or_(*conditions))
-    else:
-        # 一般用戶只能看到自己的動物
-        query = query.filter_by(owner_id=current_user_id)
-    
-    # 支援查詢參數：name (partial)、species (CAT|DOG)、min_age、max_age、breed (partial)、adopted (true/false)
-    name_q = request.args.get('name')
-    species_q = request.args.get('species')
-    breed_q = request.args.get('breed')
-    min_age = request.args.get('min_age')
-    max_age = request.args.get('max_age')
-    adopted = request.args.get('adopted')
-
-    # 篩選 - 名稱部分匹配
-    if name_q:
-        query = query.filter(Animal.name.ilike(f"%{name_q}%"))
-
-    # 品種精確或部分匹配
-    if breed_q:
-        query = query.filter(Animal.breed.ilike(f"%{breed_q}%"))
-
-    # 物種過濾 (預期 CAT 或 DOG)
-    if species_q:
-        try:
-            # 將輸入上轉大寫以對應枚舉值
-            query = query.filter(Animal.species == species_q.upper())
-        except Exception:
-            pass
-
-    # 年齡範圍: 使用 SQL 計算年齡(月數)，與 /api/animals 保持一致
     try:
-        if min_age is not None and min_age != '':
-            min_age_val = int(min_age)
-            # 使用 TIMESTAMPDIFF(MONTH, dob, CURDATE()) 計算月數
-            age_in_months = func.timestampdiff(db.text('MONTH'), Animal.dob, func.curdate())
-            query = query.filter(age_in_months >= min_age_val)
-
-        if max_age is not None and max_age != '':
-            max_age_val = int(max_age)
-            if 'age_in_months' not in locals():
-                age_in_months = func.timestampdiff(db.text('MONTH'), Animal.dob, func.curdate())
-            query = query.filter(age_in_months <= max_age_val)
-    except ValueError:
-        # 忽略年齡解析錯誤，繼續返回未篩選的結果
-        pass
-
-    # 是否已領養：我們將「申請中/審核中」視為未領養，直到申請完成。
-    # 因此已領養的條件為：status == ADOPTED 或 (owner_id 有值 且 無待審核申請)
-    # 未領養的條件為：status != ADOPTED 且 (owner_id 為 NULL 或 有待審核申請)
-    if adopted is not None:
-        adopted_val = str(adopted).lower()
-        # 準備 exists 子查詢：檢查是否存在待審核的申請
-        from app.models.application import Application, ApplicationStatus
-
-        pending_app_exists = db.session.query(Application).filter(
-            Application.animal_id == Animal.animal_id,
-            Application.deleted_at == None,
-            Application.status.in_([ApplicationStatus.PENDING, ApplicationStatus.UNDER_REVIEW])
-        ).exists()
-
-        if adopted_val in ('1', 'true', 'yes'):
-            # 已領養：status == ADOPTED OR (owner_id 有值 AND NOT pending_app_exists)
-            query = query.filter(or_(
-                Animal.status == AnimalStatus.ADOPTED,
-                and_(Animal.owner_id.isnot(None), ~pending_app_exists)
-            ))
-        elif adopted_val in ('0', 'false', 'no'):
-            # 未領養：status != ADOPTED AND (owner_id 為 NULL OR pending_app_exists)
-            query = query.filter(and_(
-                Animal.status != AnimalStatus.ADOPTED,
-                or_(Animal.owner_id.is_(None), pending_app_exists)
-            ))
-
-    # 執行查詢並序列化
-    animals = query.all()
-    animals_data = []
-    
-    for animal in animals:
-        animal_dict = animal.to_dict()
-        # 添加圖片信息
-        if hasattr(animal, 'images') and animal.images:
-            animal_dict['images'] = [img.to_dict() for img in animal.images]
-        animals_data.append(animal_dict)
-    
-    return jsonify({
-        'animals': animals_data,
-        'total': len(animals_data)
-    })
+        current_user_id = int(get_jwt_identity())
+        user = db.session.get(User, current_user_id)
+        
+        if not user:
+            abort(404, message='用戶不存在')
+        
+        # 收集過濾參數
+        filters = {
+            'name': request.args.get('name'),
+            'species': request.args.get('species'),
+            'breed': request.args.get('breed'),
+            'min_age': request.args.get('min_age'),
+            'max_age': request.args.get('max_age'),
+            'adopted': request.args.get('adopted')
+        }
+        
+        # 呼叫 Service 層
+        result = medical_record_service.list_animals_for_medical_records(user, filters)
+        return jsonify(result), 200
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @medical_records_bp.route('/animals/<int:animal_id>/medical-records', methods=['POST'])

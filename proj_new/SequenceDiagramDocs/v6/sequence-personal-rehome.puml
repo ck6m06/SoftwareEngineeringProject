@@ -1,0 +1,213 @@
+@startuml 使用案例1_個人送養發佈
+title 使用案例1: 個人送養發佈流程\n(BP-REHOME-002)
+
+actor "一般會員" as User
+participant "RehomeForm.vue" as Form
+participant "FileUploader.vue" as Uploader
+participant "animals.ts API" as AnimalAPI
+participant "medicalRecords.ts API" as MedicalAPI
+participant "uploads API" as UploadAPI
+participant "animals.py" as AnimalBlueprint
+participant "animal_service.py" as AnimalService
+participant "Animal Model" as AnimalModel
+participant "notification_service.py" as NotificationService
+database "PostgreSQL" as DB
+participant "MinIO/S3" as Storage
+
+== 1. 進入表單頁面 ==
+User -> Form: 點選「發佈送養」
+activate Form
+Form -> Form: 檢查用戶登入狀態\n(authStore.user)
+Form -> Form: 初始化表單資料\n(formData = 空白)
+Form -> Form: 檢查 localStorage\n是否有草稿
+Form --> User: 顯示空白表單
+note right
+  收容所會員會顯示提示訊息:
+  「您正在進行單次送養操作」
+end note
+
+== 2. 填寫動物基本資訊 (步驟1) ==
+User -> Form: 填寫名稱、物種、品種
+User -> Form: 選擇性別、出生日期
+User -> Form: 填寫顏色、描述
+User -> Form: 選擇是否已絕育
+Form -> Form: 即時驗證必填欄位\n(name, species, sex, dob)
+Form -> Form: 儲存草稿到 localStorage\n(rehome_draft)
+
+== 3. 上傳動物圖片 (步驟2) ==
+User -> Form: 點選「下一步」
+Form -> Form: 切換到圖片上傳步驟\n(currentStep = 1)
+User -> Uploader: 選擇圖片檔案\n(至少1張)
+activate Uploader
+Uploader -> Uploader: 驗證檔案格式\n(JPG, PNG, GIF)
+Uploader -> Uploader: 驗證檔案大小\n(最大5MB)
+Uploader -> Uploader: 產生預覽縮圖
+Uploader --> Form: 圖片已準備\n(files[])
+deactivate Uploader
+note right
+  圖片尚未上傳到伺服器
+  只儲存在客戶端記憶體
+end note
+
+== 4. 新增醫療記錄 (步驟3, 選填) ==
+User -> Form: 點選「新增醫療記錄」
+User -> Form: 填寫記錄類型、日期、提供者
+User -> Form: 填寫醫療細節
+User -> Uploader: 上傳醫療文件 (選填)
+Uploader -> Uploader: 驗證文件格式
+Uploader --> Form: 文件已準備
+Form -> Form: 將記錄加入暫存\n(tempMedicalRecords[])
+note right
+  醫療記錄暫存在前端
+  提交時才會建立
+end note
+
+== 5. 確認並提交 (步驟4) ==
+User -> Form: 檢視所有資訊
+User -> Form: 點選「發佈送養」
+Form -> Form: 驗證必填欄位
+Form -> Form: 檢查至少有1張圖片
+
+alt 編輯模式
+    Form -> AnimalAPI: updateAnimal(animalId, animalData)
+else 新增模式
+    Form -> AnimalAPI: createAnimal(animalData)
+end
+activate AnimalAPI
+
+== 6. 建立動物記錄 (後端) ==
+AnimalAPI -> AnimalBlueprint: POST /animals\n{動物資料}
+activate AnimalBlueprint
+AnimalBlueprint -> AnimalBlueprint: 驗證 JWT Token\n取得 current_user_id
+AnimalBlueprint -> AnimalService: create_animal(user, data)
+activate AnimalService
+
+AnimalService -> AnimalService: 判斷動物歸屬\n(個人送養或收容所)
+note right
+  若 user.role == SHELTER_MEMBER:
+    shelter_id = user.primary_shelter_id
+  否則:
+    owner_id = user.user_id
+end note
+
+AnimalService -> AnimalModel: 建立 Animal 物件
+activate AnimalModel
+AnimalModel -> AnimalModel: 設定初始狀態 = DRAFT
+AnimalModel -> AnimalModel: 驗證 owner_id 與 shelter_id\n互斥條件
+AnimalModel -> DB: INSERT INTO animals
+activate DB
+DB --> AnimalModel: animal_id
+deactivate DB
+AnimalModel --> AnimalService: animal
+deactivate AnimalModel
+
+AnimalService --> AnimalBlueprint: animal
+deactivate AnimalService
+AnimalBlueprint --> AnimalAPI: {animal: {...}}
+deactivate AnimalBlueprint
+AnimalAPI --> Form: animalId
+deactivate AnimalAPI
+
+== 7. 上傳圖片 ==
+Form -> Form: 準備上傳圖片檔案
+Form -> UploadAPI: uploadMultiple(files, 'ANIMAL', animalId)
+activate UploadAPI
+
+loop 每張圖片
+    UploadAPI -> UploadAPI: 取得預簽章 URL\n(presigned URL)
+    UploadAPI -> Storage: PUT 圖片檔案
+    activate Storage
+    Storage --> UploadAPI: 上傳成功
+    deactivate Storage
+    UploadAPI -> AnimalAPI: addAnimalImage(animalId, imageData)
+    activate AnimalAPI
+    AnimalAPI -> AnimalBlueprint: POST /animals/{id}/images
+    activate AnimalBlueprint
+    AnimalBlueprint -> AnimalService: add_image(...)
+    activate AnimalService
+    AnimalService -> DB: INSERT INTO animal_images
+    activate DB
+    DB --> AnimalService: image_id
+    deactivate DB
+    AnimalService --> AnimalBlueprint: image
+    deactivate AnimalService
+    AnimalBlueprint --> AnimalAPI: {image: {...}}
+    deactivate AnimalBlueprint
+    AnimalAPI --> UploadAPI: 圖片已關聯
+    deactivate AnimalAPI
+end
+
+UploadAPI --> Form: uploadResults[]
+deactivate UploadAPI
+
+== 8. 建立醫療記錄 (選填) ==
+alt 有暫存的醫療記錄
+    loop 每筆醫療記錄
+        alt 有醫療文件
+            Form -> UploadAPI: uploadMultiple(files, 'MEDICAL_RECORD', animalId)
+            activate UploadAPI
+            UploadAPI -> Storage: 上傳醫療文件
+            Storage --> UploadAPI: 文件 URLs
+            UploadAPI --> Form: uploadResults[]
+            deactivate UploadAPI
+        end
+        
+        Form -> MedicalAPI: createMedicalRecord(animalId, medicalData)
+        activate MedicalAPI
+        MedicalAPI -> DB: INSERT INTO medical_records
+        activate DB
+        DB --> MedicalAPI: record_id
+        deactivate DB
+        MedicalAPI --> Form: 醫療記錄已建立
+        deactivate MedicalAPI
+    end
+end
+
+== 9. 提交審核 ==
+Form -> AnimalAPI: submitAnimal(animalId)
+activate AnimalAPI
+AnimalAPI -> AnimalBlueprint: POST /animals/{id}/submit
+activate AnimalBlueprint
+AnimalBlueprint -> AnimalService: submit_for_review(animalId, user)
+activate AnimalService
+
+AnimalService -> AnimalService: 檢查權限\n(擁有者或收容所成員)
+AnimalService -> AnimalService: 檢查狀態 = DRAFT
+AnimalService -> DB: UPDATE animals\nSET status = 'SUBMITTED'
+activate DB
+DB --> AnimalService: 更新成功
+deactivate DB
+
+AnimalService -> NotificationService: 通知管理員審核
+activate NotificationService
+NotificationService -> DB: INSERT INTO notifications
+DB --> NotificationService: 通知已建立
+deactivate NotificationService
+
+AnimalService --> AnimalBlueprint: animal (status=SUBMITTED)
+deactivate AnimalService
+AnimalBlueprint --> AnimalAPI: {animal: {...}}
+deactivate AnimalBlueprint
+AnimalAPI --> Form: 提交成功
+deactivate AnimalAPI
+
+== 10. 完成 ==
+Form -> Form: 清除 localStorage 草稿
+Form -> Form: 設定成功訊息\n(submissionSuccess = true)
+Form --> User: 顯示成功提示\n「送養資訊已建立並提交審核成功!」
+deactivate Form
+
+note over User, DB
+  **後置條件:**
+  1. 動物記錄已建立 (status = SUBMITTED)
+  2. 圖片已上傳並關聯
+  3. 醫療記錄已建立 (如有)
+  4. 草稿已清除
+  5. 等待管理員審核
+  
+  **管理員審核通過後:**
+  status: SUBMITTED → PUBLISHED
+  公開顯示在領養清單
+end note
+
+@enduml

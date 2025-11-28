@@ -1,0 +1,394 @@
+﻿@startuml sequence-application-review
+!theme plain
+title 使用案例2: 申請審核作業
+
+actor "送養者\n(一般會員或收容所會員)" as Reviewer
+participant "applications.py\n(Blueprint)" as ApplicationsAPI
+participant "application_service.py" as ApplicationService
+participant "permission_service.py" as PermissionService
+participant "application.py\n(Model)" as ApplicationModel
+participant "animal.py\n(Model)" as AnimalModel
+participant "user.py\n(Model)" as UserModel
+participant "notification_service.py" as NotificationService
+participant "email_tasks.py\n(Celery Task)" as EmailTask
+database "MySQL" as DB
+queue "Celery Queue" as CeleryQueue
+
+== 前置條件: 瀏覽申請列表 ==
+note over Reviewer
+  前置條件: 使用者在「申請列表瀏覽」
+  作業中選擇待審核申請
+end note
+
+Reviewer -> ApplicationsAPI: GET /api/applications?mode=review\n[查看待審核申請]
+activate ApplicationsAPI
+note right: mode=review: 只顯示別人對自己動物的申請
+ApplicationsAPI -> ApplicationsAPI: @jwt_required()\n驗證 JWT Token
+ApplicationsAPI -> UserModel: User.query.get(current_user_id)
+activate UserModel
+UserModel -> DB: SELECT * FROM users\nWHERE user_id=?
+activate DB
+DB --> UserModel: User 記錄
+deactivate DB
+UserModel --> ApplicationsAPI: User 物件
+deactivate UserModel
+
+ApplicationsAPI -> ApplicationService: list_applications(\nuser, mode='review'\n)
+activate ApplicationService
+
+ApplicationService -> ApplicationModel: Application.query.filter_by(\ndeleted_at=None\n)
+activate ApplicationModel
+
+alt user.role == ADMIN
+    ApplicationModel -> DB: SELECT * FROM applications\nWHERE deleted_at IS NULL
+    activate DB
+    DB --> ApplicationModel: 所有申請記錄
+    deactivate DB
+else user.role == GENERAL_MEMBER || SHELTER_MEMBER
+    ApplicationModel -> AnimalModel: 查詢 owned_animal_ids\n(owner_id || shelter_id)
+    activate AnimalModel
+    AnimalModel -> DB: SELECT animal_id FROM animals\nWHERE owner_id=? OR shelter_id=?
+    activate DB
+    DB --> AnimalModel: owned_animal_ids
+    deactivate DB
+    AnimalModel --> ApplicationModel: owned_animal_ids
+    deactivate AnimalModel
+    
+    ApplicationModel -> DB: SELECT * FROM applications\nWHERE animal_id IN (...)\nAND deleted_at IS NULL
+    activate DB
+    DB --> ApplicationModel: 申請記錄
+    deactivate DB
+end
+
+ApplicationModel --> ApplicationService: 申請列表
+deactivate ApplicationModel
+
+ApplicationService --> ApplicationsAPI: 申請列表
+deactivate ApplicationService
+ApplicationsAPI --> Reviewer: 200 OK\n{ items: [...], total, pages }
+deactivate ApplicationsAPI
+
+== 查看申請詳細資料 ==
+Reviewer -> ApplicationsAPI: GET /api/applications/{application_id}\n[查看申請詳情]
+activate ApplicationsAPI
+
+ApplicationsAPI -> ApplicationsAPI: @jwt_required()\n驗證 JWT Token
+ApplicationsAPI -> UserModel: User.query.get(current_user_id)
+activate UserModel
+UserModel -> DB: SELECT * FROM users\nWHERE user_id=?
+activate DB
+DB --> UserModel: User 記錄
+deactivate DB
+UserModel --> ApplicationsAPI: User 物件
+deactivate UserModel
+
+ApplicationsAPI -> ApplicationService: get_application(\napplication_id, user\n)
+activate ApplicationService
+
+ApplicationService -> ApplicationModel: Application.query.filter_by(\napplication_id, deleted_at=None\n).first()
+activate ApplicationModel
+ApplicationModel -> DB: SELECT * FROM applications\nWHERE application_id=?\nAND deleted_at IS NULL
+activate DB
+DB --> ApplicationModel: Application 記錄
+deactivate DB
+ApplicationModel --> ApplicationService: Application 物件
+deactivate ApplicationModel
+
+ApplicationService -> PermissionService: can_view_application(user, application)
+activate PermissionService
+
+PermissionService -> PermissionService: 檢查申請人本人?\napplicant_id == user.user_id
+
+alt 不是申請人
+    PermissionService -> PermissionService: 檢查管理員?\nuser.role == ADMIN
+    
+    alt 不是管理員
+        PermissionService -> PermissionService: 檢查是否為動物管理者?\ncan_manage_animal(user, animal)
+        note right
+          個人送養: owner_id == user_id
+          收容所送養: shelter_id == user.primary_shelter_id
+        end note
+    end
+end
+
+PermissionService --> ApplicationsAPI: True (有權限)
+deactivate PermissionService
+
+ApplicationsAPI -> ApplicationModel: application.applicant\n(lazy loading)
+activate ApplicationModel
+ApplicationModel -> UserModel: User.query.get(applicant_id)
+activate UserModel
+UserModel -> DB: SELECT * FROM users\nWHERE user_id=?
+activate DB
+DB --> UserModel: User 記錄
+deactivate DB
+UserModel --> ApplicationModel: applicant
+deactivate UserModel
+
+ApplicationModel -> AnimalModel: application.animal\n(lazy loading)
+activate AnimalModel
+AnimalModel -> DB: SELECT * FROM animals\nWHERE animal_id=?
+activate DB
+DB --> AnimalModel: Animal 記錄
+deactivate DB
+AnimalModel --> ApplicationModel: animal
+deactivate AnimalModel
+ApplicationModel --> ApplicationService: 完整 Application 資料
+deactivate ApplicationModel
+
+ApplicationService --> ApplicationsAPI: Application 物件
+deactivate ApplicationService
+ApplicationsAPI --> Reviewer: 200 OK\n{ application (含 applicant, animal 資訊) }
+deactivate ApplicationsAPI
+
+note over Reviewer
+  送養者檢視申請內容:
+  - 申請人基本資料
+  - 聯絡方式
+  - 居住環境
+  - 飼養經驗
+  - 申請理由
+end note
+
+== 進行審核評估與填寫意見 ==
+note over Reviewer
+  送養者進行審核評估
+  填寫審核意見 (review_notes)
+  選擇審核結果: 核准 (approve) 或拒絕 (reject)
+end note
+
+== 提交審核結果 ==
+Reviewer -> ApplicationsAPI: POST /api/applications/{application_id}/review
+activate ApplicationsAPI
+note right
+  {
+    "action": "approve" | "reject",
+    "review_notes": "審核意見...",
+    "version": 1  // 樂觀鎖
+  }
+end note
+
+ApplicationsAPI -> ApplicationsAPI: @jwt_required()\n驗證 JWT Token
+ApplicationsAPI -> UserModel: User.query.get(current_user_id)
+activate UserModel
+UserModel -> DB: SELECT * FROM users\nWHERE user_id=?
+activate DB
+DB --> UserModel: User 記錄
+deactivate DB
+UserModel --> ApplicationsAPI: User 物件
+deactivate UserModel
+
+ApplicationsAPI -> ApplicationService: review_application(\napplication_id, reviewer,\naction, review_notes, version)
+activate ApplicationService
+
+ApplicationService -> ApplicationModel: Application.query.filter_by(\n  application_id, deleted_at=None\n).first()
+activate ApplicationModel
+ApplicationModel -> DB: SELECT * FROM applications\nWHERE application_id=?\nAND deleted_at IS NULL
+activate DB
+DB --> ApplicationModel: Application 記錄
+deactivate DB
+ApplicationModel --> ApplicationService: Application 物件
+deactivate ApplicationModel
+
+ApplicationService -> PermissionService: can_review_application(reviewer, application)
+activate PermissionService
+
+PermissionService -> ApplicationModel: application.animal
+activate ApplicationModel
+ApplicationModel -> AnimalModel: Animal.query.get(animal_id)
+activate AnimalModel
+AnimalModel -> DB: SELECT * FROM animals\nWHERE animal_id=?
+activate DB
+DB --> AnimalModel: Animal 記錄
+deactivate DB
+AnimalModel --> ApplicationModel: Animal 物件
+deactivate AnimalModel
+ApplicationModel --> PermissionService: animal
+deactivate ApplicationModel
+
+alt animal.owner_id 存在 (個人送養)
+    PermissionService -> PermissionService: 檢查 owner_id == user.user_id
+    note right: 只有動物擁有者可審核
+else animal.shelter_id 存在 (收容所送養)
+    PermissionService -> PermissionService: 檢查 user.role == SHELTER_MEMBER\n&& user.primary_shelter_id == animal.shelter_id
+    note right: 該收容所的成員可審核
+end
+
+alt reviewer.role == ADMIN
+    PermissionService --> ApplicationService: False
+    ApplicationService --> ApplicationsAPI: PermissionDeniedError\n"領養申請應由送養人或收容所成員審核,\n管理員無權審核"
+    ApplicationsAPI --> Reviewer: 403 Forbidden
+    deactivate PermissionService
+    deactivate ApplicationService
+    deactivate ApplicationsAPI
+    note over Reviewer
+      管理員不能審核送養申請
+      (商業規則限制)
+    end note
+else 無權限
+    PermissionService --> ApplicationService: False
+    ApplicationService --> ApplicationsAPI: PermissionDeniedError
+    ApplicationsAPI --> Reviewer: 403 Forbidden
+    deactivate PermissionService
+    deactivate ApplicationService
+    deactivate ApplicationsAPI
+end
+
+PermissionService --> ApplicationService: True (有權限)
+deactivate PermissionService
+
+ApplicationService -> ApplicationService: 驗證 action\nif action not in ['approve', 'reject']:\n  raise ValidationError
+
+ApplicationService -> ApplicationService: 檢查申請狀態\nif status not in [PENDING, UNDER_REVIEW]:\n  raise ValidationError
+
+ApplicationService -> ApplicationService: 樂觀鎖檢查\nif version != application.version:\n  raise ConflictError\n  "申請已被其他人修改"
+
+ApplicationService -> ApplicationService: 保存舊狀態\nold_status = application.status
+
+alt action == 'approve' (核准)
+    ApplicationService -> ApplicationModel: application.status = APPROVED\napplication.assignee_id = reviewer.user_id\napplication.reviewed_at = now()
+    activate ApplicationModel
+    ApplicationModel --> ApplicationService: 屬性已更新
+    deactivate ApplicationModel
+    
+    ApplicationService -> AnimalModel: animal.status = ADOPTED\nanimal.updated_at = now()
+    activate AnimalModel
+    note right: 核准後該動物不會在公開清單
+    AnimalModel --> ApplicationService: 屬性已更新
+    deactivate AnimalModel
+    
+else action == 'reject' (拒絕)
+    ApplicationService -> ApplicationModel: application.status = REJECTED\napplication.assignee_id = reviewer.user_id\napplication.reviewed_at = now()
+    activate ApplicationModel
+    note right: 動物狀態不變,仍可接受其他申請
+    ApplicationModel --> ApplicationService: 屬性已更新
+    deactivate ApplicationModel
+end
+
+ApplicationService -> ApplicationModel: application.review_notes = review_notes\napplication.version += 1
+activate ApplicationModel
+ApplicationModel --> ApplicationService: 屬性已更新
+deactivate ApplicationModel
+
+ApplicationService -> DB: db.session.commit()
+activate DB
+DB -> DB: UPDATE applications SET...\nUPDATE animals SET... (if approved)
+DB --> ApplicationService: 更新成功
+deactivate DB
+
+== 記錄審計日誌 ==
+ApplicationService -> DB: 寫入審計日誌\naudit_service.log_application_review()
+activate DB
+note right
+  記錄:
+  - application_id
+  - reviewer_id
+  - old_status -> new_status
+  - timestamp
+end note
+DB --> ApplicationService: 審計日誌已記錄
+deactivate DB
+
+== 發送通知給申請人 ==
+ApplicationService -> NotificationService: notify_application_reviewed(\napplication, reviewer_id,\nstatus, review_notes)
+activate NotificationService
+
+NotificationService -> DB: 建立 Notification 記錄
+activate DB
+note right
+  type: 'application_approved' | 'application_rejected'
+  recipient_id: application.applicant_id
+  actor_id: reviewer.user_id
+  payload: { animal_name, status, review_notes }
+end note
+DB -> DB: INSERT INTO notifications
+DB --> NotificationService: 通知已建立
+deactivate DB
+NotificationService --> ApplicationService: 通知已發送
+deactivate NotificationService
+
+== 發送 Email 通知 (非同步) ==
+ApplicationService -> ApplicationModel: 取得申請人和動物資訊
+activate ApplicationModel
+ApplicationModel -> UserModel: application.applicant
+activate UserModel
+UserModel -> DB: SELECT * FROM users
+activate DB
+DB --> UserModel: applicant
+deactivate DB
+UserModel --> ApplicationModel: applicant
+deactivate UserModel
+
+ApplicationModel -> AnimalModel: application.animal
+activate AnimalModel
+AnimalModel -> DB: SELECT * FROM animals
+activate DB
+DB --> AnimalModel: animal
+deactivate DB
+AnimalModel --> ApplicationModel: animal
+deactivate AnimalModel
+ApplicationModel --> ApplicationService: applicant, animal
+deactivate ApplicationModel
+
+alt applicant.email 存在
+    alt animal.owner_id 存在
+        ApplicationService -> UserModel: User.query.get(owner_id)
+        activate UserModel
+        UserModel -> DB: SELECT * FROM users\nWHERE user_id=?
+        activate DB
+        DB --> UserModel: owner 記錄
+        deactivate DB
+        UserModel --> ApplicationService: owner 資訊
+        deactivate UserModel
+        ApplicationService -> ApplicationService: 準備聯絡資訊\ncontact_info = { type: 'owner',\nname, email, phone }
+    else animal.shelter_id 存在
+        ApplicationService -> DB: 查詢 shelter (Shelter)
+        activate DB
+        DB --> ApplicationService: shelter 資訊
+        deactivate DB
+        ApplicationService -> ApplicationService: 準備聯絡資訊\ncontact_info = { type: 'shelter',\nname, email, phone }
+    end
+    
+    ApplicationService -> EmailTask: send_application_notification_email_task.delay(\napplicant.email, animal.name,\nstatus, review_notes, contact_info)
+    activate EmailTask
+    note right: Celery 非同步任務
+    
+    EmailTask -> CeleryQueue: 加入任務佇列
+    activate CeleryQueue
+    CeleryQueue --> EmailTask: task_id
+    deactivate CeleryQueue
+    EmailTask --> ApplicationService: 任務已排程
+    deactivate EmailTask
+end
+
+ApplicationService --> ApplicationsAPI: Application 物件\n(status = APPROVED/REJECTED)
+deactivate ApplicationService
+
+ApplicationsAPI --> Reviewer: 200 OK\n{ message: "申請已核准/拒絕", application }
+deactivate ApplicationsAPI
+
+note over Reviewer
+  審核完成:
+  - 系統通知申請人審核結果
+  - 如核准,該動物不會在公開清單
+  - 申請人會收到站內通知和 Email
+end note
+
+== 非同步 Email 發送 (背景執行) ==
+CeleryQueue -> EmailTask: 執行任務
+activate CeleryQueue
+activate EmailTask
+EmailTask -> EmailTask: 渲染 Email 模板\napplication_notification.html
+EmailTask -> EmailTask: SMTP 發送郵件\nsmtplib.send_message()
+note over EmailTask
+  Email 內容包含:
+  - 審核結果 (核准/拒絕)
+  - 動物名稱
+  - 審核意見
+  - 聯絡資訊 (核准時)
+end note
+EmailTask --> CeleryQueue: 任務完成
+deactivate EmailTask
+deactivate CeleryQueue
+
+@enduml

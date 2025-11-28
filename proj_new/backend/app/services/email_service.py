@@ -79,13 +79,13 @@ class EmailService:
             return False
 
     def send_verification_email(self, user_email: str, username: str, token: str) -> bool:
-        verify_url = f"{current_app.config.get('FRONTEND_URL', 'http://localhost:3000')}/verify-email?token={token}"
+        verify_url = f"{current_app.config.get('FRONTEND_URL', 'http://localhost:5173')}/verify-email?token={token}"
         subject = f"[{current_app.config.get('APP_NAME','App')}] 驗證您的 Email"
         body = f"請點擊以下連結以驗證您的 Email:\n\n{verify_url}\n\n或在前端輸入 token: {token}\n\n此 token 24 小時內有效。"
         return self._send_via_smtp(subject, user_email, body)
 
     def send_password_reset_email(self, user_email: str, username: str, token: str) -> bool:
-        reset_url = f"{current_app.config.get('FRONTEND_URL', 'http://localhost:3000')}/reset-password?token={token}"
+        reset_url = f"{current_app.config.get('FRONTEND_URL', 'http://localhost:5173')}/reset-password?token={token}"
         subject = f"[{current_app.config.get('APP_NAME','App')}] 重置密碼"
         body = f"請點擊以下連結以重置密碼:\n\n{reset_url}\n\n或在前端輸入 token: {token}\n\n此 token 1 小時內有效。"
         return self._send_via_smtp(subject, user_email, body)

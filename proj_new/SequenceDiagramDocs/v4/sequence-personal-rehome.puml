@@ -1,0 +1,248 @@
+﻿@startuml sequence-personal-rehome
+!theme plain
+title 使用案例1: 個人送養發佈
+
+actor "一般會員" as User
+participant "animals.py\n(Blueprint)" as AnimalsAPI
+participant "animal_service.py" as AnimalService
+participant "permission_service.py" as PermissionService
+participant "animal.py\n(Model)" as AnimalModel
+participant "user.py\n(Model)" as UserModel
+participant "uploads.py\n(Blueprint)" as UploadsAPI
+participant "minio_helper.py" as MinioHelper
+database "MySQL" as DB
+queue "MinIO\n(Object Storage)" as MinIO
+
+== 初始化頁面 ==
+User -> AnimalsAPI: GET /api/animals?owner_id={user_id}\n[載入自己的動物列表]
+activate AnimalsAPI
+AnimalsAPI -> AnimalsAPI: @jwt_required(optional=True)\n驗證 JWT Token
+AnimalsAPI -> UserModel: User.query.get(current_user_id)
+activate UserModel
+UserModel -> DB: SELECT * FROM users\nWHERE user_id=?
+activate DB
+DB --> UserModel: User 記錄
+deactivate DB
+UserModel --> AnimalsAPI: User 物件
+deactivate UserModel
+
+AnimalsAPI -> AnimalService: list_animals(\nuser, filters={owner_id}\n)
+activate AnimalService
+
+AnimalService -> AnimalModel: Animal.query.filter_by(\nowner_id, deleted_at=None\n)
+activate AnimalModel
+AnimalModel -> DB: SELECT * FROM animals\nWHERE owner_id=?\nAND deleted_at IS NULL
+activate DB
+DB --> AnimalModel: Animal 記錄列表
+deactivate DB
+AnimalModel --> AnimalService: 動物列表
+deactivate AnimalModel
+
+AnimalService --> AnimalsAPI: 動物列表
+deactivate AnimalService
+AnimalsAPI --> User: 200 OK\n{ items: [...], total, pages }
+deactivate AnimalsAPI
+
+== 上傳動物圖片(可多張) ==
+loop 每張圖片
+    User -> UploadsAPI: POST /api/uploads/direct\n[上傳圖片檔案]
+    activate UploadsAPI
+    note right: Content-Type: multipart/form-data\n檔案: file
+    UploadsAPI -> UploadsAPI: @jwt_required()\n驗證 JWT Token
+    UploadsAPI -> UploadsAPI: 生成唯一 object_key\nuploads/{user_id}/{uuid}.{ext}
+    UploadsAPI -> MinioHelper: put_object()\n[上傳檔案]
+    activate MinioHelper
+    MinioHelper -> MinIO: 上傳檔案
+    activate MinIO
+    MinIO --> MinioHelper: 成功
+    deactivate MinIO
+    MinioHelper --> UploadsAPI: storage_key
+    deactivate MinioHelper
+    UploadsAPI -> UploadsAPI: 生成公開 URL\nhttp://{minio}/{bucket}/{key}
+    UploadsAPI --> User: 200 OK\n{ storage_key, url, filename, size }
+    deactivate UploadsAPI
+end
+
+== 上傳醫療記錄檔案 ==
+User -> UploadsAPI: POST /api/uploads/direct\n[上傳醫療記錄PDF/圖片]
+activate UploadsAPI
+UploadsAPI -> UploadsAPI: @jwt_required()\n驗證 JWT Token
+UploadsAPI -> UploadsAPI: 生成 object_key
+UploadsAPI -> MinioHelper: put_object()
+activate MinioHelper
+MinioHelper -> MinIO: 上傳檔案
+activate MinIO
+MinIO --> MinioHelper: 成功
+deactivate MinIO
+MinioHelper --> UploadsAPI: storage_key
+deactivate MinioHelper
+UploadsAPI --> User: 200 OK\n{ storage_key, url }
+deactivate UploadsAPI
+
+== 發佈送養資料 ==
+User -> AnimalsAPI: POST /api/animals\n[建立動物資料]
+activate AnimalsAPI
+note right
+  {
+    "name": "小白",
+    "species": "DOG",
+    "breed": "柴犬",
+    "sex": "MALE",
+    "dob": "2023-01-01",
+    "description": "活潑好動...",
+    "medical_summary": "已絕育..."
+  }
+end note
+
+AnimalsAPI -> AnimalsAPI: @jwt_required()\n驗證 JWT Token
+AnimalsAPI -> UserModel: User.query.get(current_user_id)
+activate UserModel
+UserModel -> DB: SELECT * FROM users\nWHERE user_id=?
+activate DB
+DB --> UserModel: User 記錄
+deactivate DB
+UserModel --> AnimalsAPI: User 物件
+deactivate UserModel
+
+AnimalsAPI -> AnimalService: create_animal(user, data)
+activate AnimalService
+
+alt user.role == SHELTER_MEMBER && user.primary_shelter_id
+    AnimalService -> AnimalService: 判定為收容所動物\nshelter_id = user.primary_shelter_id\nowner_id = None
+else user.role == GENERAL_MEMBER
+    AnimalService -> AnimalService: 判定為個人送養\nowner_id = user.user_id\nshelter_id = None
+end
+
+AnimalService -> AnimalModel: Animal(\n  name, species, breed,\n  sex, dob, description,\n  status=DRAFT,\n  owner_id/shelter_id,\n  created_by\n)
+activate AnimalModel
+AnimalModel --> AnimalService: Animal 實例
+deactivate AnimalModel
+
+AnimalService -> DB: db.session.add(animal)\ndb.session.commit()
+activate DB
+DB -> DB: INSERT INTO animals\nVALUES(...)
+DB --> AnimalService: animal_id=123
+deactivate DB
+
+AnimalService --> AnimalsAPI: Animal 物件
+deactivate AnimalService
+AnimalsAPI --> User: 201 Created\n{ message: "動物資料建立成功", animal }
+deactivate AnimalsAPI
+
+== 新增動物圖片關聯 ==
+loop 每張已上傳的圖片
+    User -> AnimalsAPI: POST /api/animals/{animal_id}/images
+    activate AnimalsAPI
+    note right
+      {
+        "storage_key": "uploads/1/uuid.jpg",
+        "image_url": "http://minio/...",
+        "mime_type": "image/jpeg"
+      }
+    end note
+    
+    AnimalsAPI -> AnimalsAPI: @jwt_required()\n驗證 JWT Token
+    AnimalsAPI -> UserModel: User.query.get(current_user_id)
+    activate UserModel
+    UserModel -> DB: SELECT * FROM users
+    activate DB
+    DB --> UserModel: User 記錄
+    deactivate DB
+    UserModel --> AnimalsAPI: User 物件
+    deactivate UserModel
+    
+    AnimalsAPI -> AnimalService: add_image(animal_id, user,\nstorage_key, url, mime_type)
+    activate AnimalService
+    
+    AnimalService -> AnimalModel: Animal.query.filter_by(\nanimal_id, deleted_at=None\n).first()
+    activate AnimalModel
+    AnimalModel -> DB: SELECT * FROM animals\nWHERE animal_id=?\nAND deleted_at IS NULL
+    activate DB
+    DB --> AnimalModel: Animal 記錄
+    deactivate DB
+    AnimalModel --> AnimalService: Animal 物件
+    deactivate AnimalModel
+    
+    AnimalService -> PermissionService: can_manage_animal(user, animal)
+    activate PermissionService
+    PermissionService --> AnimalService: True (是擁有者)
+    deactivate PermissionService
+    
+    AnimalService -> DB: SELECT MAX(order)\nFROM animal_images\nWHERE animal_id=?
+    activate DB
+    DB --> AnimalService: max_order=2
+    deactivate DB
+    
+    AnimalService -> AnimalModel: AnimalImage(\n  animal_id, storage_key,\n  url, mime_type, order=3\n)
+    activate AnimalModel
+    AnimalModel --> AnimalService: AnimalImage 實例
+    deactivate AnimalModel
+    
+    AnimalService -> DB: db.session.add(image)\ndb.session.commit()
+    activate DB
+    DB -> DB: INSERT INTO animal_images
+    DB --> AnimalService: 儲存成功
+    deactivate DB
+    
+    AnimalService --> AnimalsAPI: AnimalImage 物件
+    deactivate AnimalService
+    AnimalsAPI --> User: 201 Created\n{ message: "圖片已新增", image }
+    deactivate AnimalsAPI
+end
+
+== 提交審核 ==
+User -> AnimalsAPI: POST /api/animals/{animal_id}/submit\n[提交供管理員審核]
+activate AnimalsAPI
+
+AnimalsAPI -> AnimalsAPI: @jwt_required()\n驗證 JWT Token
+AnimalsAPI -> UserModel: User.query.get(current_user_id)
+activate UserModel
+UserModel -> DB: SELECT * FROM users
+activate DB
+DB --> UserModel: User 記錄
+deactivate DB
+UserModel --> AnimalsAPI: User 物件
+deactivate UserModel
+
+AnimalsAPI -> AnimalService: submit_for_review(animal_id, user)
+activate AnimalService
+
+AnimalService -> AnimalModel: Animal.query.filter_by(\n  animal_id, deleted_at=None\n).first()
+activate AnimalModel
+AnimalModel -> DB: SELECT * FROM animals\nWHERE animal_id=?\nAND deleted_at IS NULL
+activate DB
+DB --> AnimalModel: Animal 記錄
+deactivate DB
+AnimalModel --> AnimalService: Animal (status=DRAFT)
+deactivate AnimalModel
+
+AnimalService -> PermissionService: can_submit_animal_for_review(user, animal)
+activate PermissionService
+PermissionService -> PermissionService: 檢查 can_manage_animal()
+PermissionService --> AnimalService: True (是擁有者)
+deactivate PermissionService
+
+AnimalService -> AnimalService: 驗證狀態\nif status != DRAFT:\n  raise ValidationError
+
+AnimalService -> AnimalModel: animal.status = SUBMITTED
+activate AnimalModel
+AnimalModel --> AnimalService: 屬性已更新
+deactivate AnimalModel
+
+AnimalService -> DB: db.session.commit()
+activate DB
+DB -> DB: UPDATE animals\nSET status='SUBMITTED'\nWHERE animal_id=?
+DB --> AnimalService: 更新成功
+deactivate DB
+
+AnimalService --> AnimalsAPI: Animal (status=SUBMITTED)
+deactivate AnimalService
+AnimalsAPI --> User: 200 OK\n{ message: "動物已提交審核", animal }
+deactivate AnimalsAPI
+
+note over User
+  送養資料狀態 = "審核中" (SUBMITTED)
+  等待管理員審核通過後才會公開顯示
+end note
+
+@enduml

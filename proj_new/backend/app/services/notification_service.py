@@ -235,6 +235,131 @@ class NotificationService:
             actor_id=None,  # 系統通知
             payload=payload
         )
+    
+    @staticmethod
+    def list_notifications(user_id: int, read_filter: str = None, page: int = 1, per_page: int = 20):
+        """
+        獲取使用者的通知列表
+        
+        Args:
+            user_id: 使用者 ID
+            read_filter: 已讀篩選 ('true', 'false', None=全部)
+            page: 頁碼
+            per_page: 每頁數量
+            
+        Returns:
+            dict: 包含通知列表和分頁資訊
+        """
+        query = Notification.query.filter_by(recipient_id=user_id)
+        
+        # 篩選已讀/未讀
+        if read_filter is not None:
+            is_read = read_filter.lower() == 'true'
+            query = query.filter_by(read=is_read)
+        
+        # 排序並分頁
+        pagination = query.order_by(Notification.created_at.desc()).paginate(
+            page=page, per_page=per_page, error_out=False
+        )
+        
+        return {
+            'notifications': [n.to_dict() for n in pagination.items],
+            'total': pagination.total,
+            'page': page,
+            'per_page': per_page,
+            'pages': pagination.pages
+        }
+    
+    @staticmethod
+    def get_unread_count(user_id: int) -> int:
+        """
+        獲取使用者的未讀通知數量
+        
+        Args:
+            user_id: 使用者 ID
+            
+        Returns:
+            int: 未讀通知數量
+        """
+        return Notification.query.filter_by(
+            recipient_id=user_id,
+            read=False
+        ).count()
+    
+    @staticmethod
+    def mark_as_read(notification_id: int, user_id: int):
+        """
+        標記通知為已讀
+        
+        Args:
+            notification_id: 通知 ID
+            user_id: 使用者 ID
+            
+        Returns:
+            Notification: 更新後的通知物件
+            
+        Raises:
+            ValueError: 通知不存在或無權限
+        """
+        notification = Notification.query.filter_by(
+            notification_id=notification_id,
+            recipient_id=user_id
+        ).first()
+        
+        if not notification:
+            raise ValueError('通知不存在')
+        
+        if not notification.read:
+            notification.read = True
+            notification.read_at = datetime.utcnow()
+            db.session.commit()
+        
+        return notification
+    
+    @staticmethod
+    def mark_all_as_read(user_id: int) -> int:
+        """
+        標記所有通知為已讀
+        
+        Args:
+            user_id: 使用者 ID
+            
+        Returns:
+            int: 更新的通知數量
+        """
+        updated_count = Notification.query.filter_by(
+            recipient_id=user_id,
+            read=False
+        ).update({
+            'read': True,
+            'read_at': datetime.utcnow()
+        })
+        
+        db.session.commit()
+        return updated_count
+    
+    @staticmethod
+    def delete_notification(notification_id: int, user_id: int):
+        """
+        刪除通知
+        
+        Args:
+            notification_id: 通知 ID
+            user_id: 使用者 ID
+            
+        Raises:
+            ValueError: 通知不存在或無權限
+        """
+        notification = Notification.query.filter_by(
+            notification_id=notification_id,
+            recipient_id=user_id
+        ).first()
+        
+        if not notification:
+            raise ValueError('通知不存在')
+        
+        db.session.delete(notification)
+        db.session.commit()
 
 
 # 建立全域實例

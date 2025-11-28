@@ -26,102 +26,31 @@ def list_applications():
     """
     取得申請列表
     ---
-    支援過濾: status, animal_id, applicant_id
+    支援過濾: status, animal_id, applicant_id, mode
     """
     try:
         current_user_id = int(get_jwt_identity())
-        current_user = User.query.get(current_user_id)
+        current_user = db.session.get(User, current_user_id)
         
-        # 分頁參數
-        page = request.args.get('page', 1, type=int)
-        per_page = request.args.get('per_page', 20, type=int)
+        if not current_user:
+            return jsonify({'message': '用戶不存在'}), 404
         
-        # 基礎查詢
-        query = Application.query.filter_by(deleted_at=None)
+        # 收集過濾參數
+        filters = {
+            'page': request.args.get('page', 1, type=int),
+            'per_page': request.args.get('per_page', 20, type=int),
+            'mode': request.args.get('mode', 'all'),
+            'status': request.args.get('status'),
+            'animal_id': request.args.get('animal_id', type=int),
+            'applicant_id': request.args.get('applicant_id', type=int)
+        }
         
-        # 權限過濾邏輯:
-        # - 管理員: 可以看到所有申請
-        # - 送養人: 只能看到針對自己動物的申請
-        # - 申請人: 只能看到自己提交的申請
+        # 呼叫 Service 層
+        result = application_service.list_applications(current_user, filters)
+        return jsonify(result), 200
         
-        # 檢查查詢模式
-        mode = request.args.get('mode', 'all')  # 'all', 'review', 'my'
-        
-        if current_user.role == UserRole.ADMIN:
-            # 管理員可以看到所有申請,不需要額外過濾
-            pass
-        else:
-            # 非管理員: 查詢自己擁有的動物ID列表
-            owned_animal_ids = []
-            
-            # 1. 查詢個人送養動物 (owner_id = 當前用戶)
-            personal_animals = db.session.query(Animal.animal_id).filter_by(
-                owner_id=current_user_id,
-                deleted_at=None
-            ).all()
-            owned_animal_ids.extend([aid[0] for aid in personal_animals])
-            
-            # 2. 如果是收容所成員，查詢所屬收容所的動物 (shelter_id = 用戶所屬收容所)
-            if current_user.role == UserRole.SHELTER_MEMBER and current_user.primary_shelter_id:
-                shelter_animals = db.session.query(Animal.animal_id).filter_by(
-                    shelter_id=current_user.primary_shelter_id,
-                    deleted_at=None
-                ).all()
-                owned_animal_ids.extend([aid[0] for aid in shelter_animals])
-            
-            # 根據模式決定過濾條件
-            if mode == 'review':
-                # 審核模式: 只顯示別人對自己動物的申請 (不包括自己提交的申請)
-                query = query.filter(Application.animal_id.in_(owned_animal_ids))
-            elif mode == 'my':
-                # 我的申請模式: 只顯示自己提交的申請
-                query = query.filter_by(applicant_id=current_user_id)
-            else:
-                # 默認模式 (向後兼容): 自己提交的申請 OR 針對自己動物的申請
-                query = query.filter(
-                    or_(
-                        Application.applicant_id == current_user_id,
-                        Application.animal_id.in_(owned_animal_ids)
-                    )
-                )
-        
-        # 過濾條件
-        if 'status' in request.args:
-            status_str = request.args.get('status')
-            try:
-                status_enum = ApplicationStatus(status_str)
-                query = query.filter_by(status=status_enum)
-            except ValueError:
-                abort(400, message=f'無效的狀態值: {status_str}')
-        if 'animal_id' in request.args:
-            query = query.filter_by(animal_id=request.args.get('animal_id', type=int))
-        
-        # applicant_id 過濾邏輯優化
-        if 'applicant_id' in request.args:
-            requested_applicant_id = request.args.get('applicant_id', type=int)
-            
-            # 非管理員只能查詢自己的申請
-            if current_user.role != UserRole.ADMIN:
-                if requested_applicant_id != current_user_id:
-                    abort(403, message='無權限查看其他用戶的申請')
-                query = query.filter_by(applicant_id=current_user_id)
-            else:
-                # 只有管理員可以查詢指定用戶的申請
-                query = query.filter_by(applicant_id=requested_applicant_id)
-        
-        # 執行分頁查詢
-        pagination = query.order_by(Application.created_at.desc()).paginate(
-            page=page, per_page=per_page, error_out=False
-        )
-        
-        return jsonify({
-            'items': [app.to_dict(include_relations=True) for app in pagination.items],
-            'total': pagination.total,
-            'page': page,
-            'per_page': per_page,
-            'pages': pagination.pages
-        }), 200
-        
+    except BusinessException as e:
+        return jsonify({'message': str(e)}), e.status_code
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

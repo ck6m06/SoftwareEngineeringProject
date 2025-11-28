@@ -121,7 +121,7 @@ proj_new/
 
 ```bash
 # 移除所有服務(刪除所有SQL和minio圖片資料，重啟)(可選)
-docker-compose down -v
+docker compose down -v
 
 # 複製環境變數檔案（包含預配置的Gmail SMTP設定）
 cp .env.example .env
@@ -129,24 +129,23 @@ cp backend/.env.example backend/.env
 cp frontend/.env.example frontend/.env
 
 # 啟動所有服務
-docker-compose up -d
+docker compose up -d
 
 # 等待服務完全啟動（約15秒）
 timeout 15  # Windows: timeout /t 15
 
 # 初始化資料庫（首次啟動時）
-docker-compose exec backend flask db current
-# 如遇到遷移問題，執行：
-# docker-compose exec backend flask db stamp f024b1dbf16b
+docker compose exec backend flask db upgrade
+docker compose exec backend flask db current
 
 # 建立測試帳號（推薦）
-docker-compose exec backend python create_test_accounts.py
+docker compose exec backend python create_test_accounts.py
 
 # 查看服務狀態
-docker-compose ps
+docker compose ps
 
 # 查看日誌
-docker-compose logs -f
+docker compose logs -f
 ```
 
 服務將在以下端口運行：

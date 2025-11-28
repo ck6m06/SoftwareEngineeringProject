@@ -439,6 +439,198 @@ class AnimalService:
                 image.order = item['order']
         
         db.session.commit()
+    
+    @staticmethod
+    def list_animals(filters: dict, current_user_id: int = None) -> dict:
+        """
+        獲取動物列表 (支援複雜篩選)
+        
+        Args:
+            filters: 篩選條件字典
+                - species: 物種
+                - sex: 性別
+                - status: 狀態
+                - shelter_id: 收容所 ID
+                - owner_id: 擁有者 ID
+                - created_by: 創建者 ID
+                - source_type: 來源類型 (shelter/personal)
+                - region: 地區
+                - min_age: 最小年齡 (月數)
+                - max_age: 最大年齡 (月數)
+                - q: 關鍵字搜尋
+                - page: 頁碼
+                - per_page: 每頁筆數
+            current_user_id: 當前用戶 ID (可選)
+            
+        Returns:
+            dict: 包含動物列表和分頁資訊
+        """
+        from app.models.user import User
+        from app.models.shelter import Shelter
+        from sqlalchemy import func
+        
+        # 取得篩選參數
+        species = filters.get('species')
+        sex = filters.get('sex')
+        status = filters.get('status')
+        shelter_id = filters.get('shelter_id')
+        owner_id = filters.get('owner_id')
+        created_by = filters.get('created_by')
+        source_type = filters.get('source_type')
+        region = filters.get('region')
+        min_age = filters.get('min_age')
+        max_age = filters.get('max_age')
+        q = filters.get('q', '').strip()
+        page = filters.get('page', 1)
+        per_page = min(filters.get('per_page', 20), 100)
+        
+        # 建立基礎查詢
+        query = Animal.query.filter_by(deleted_at=None)
+        
+        # 處理 owner_id 篩選的權限邏輯
+        if owner_id:
+            if current_user_id == owner_id:
+                # 查詢自己的動物
+                current_user = db.session.get(User, current_user_id)
+                
+                if current_user and current_user.role == UserRole.SHELTER_MEMBER and current_user.primary_shelter_id:
+                    # 收容所成員：查詢個人動物 + 收容所動物
+                    query = query.filter(
+                        db.or_(
+                            Animal.owner_id == owner_id,
+                            Animal.shelter_id == current_user.primary_shelter_id
+                        )
+                    )
+                else:
+                    # 一般用戶：只查詢個人動物 (包含草稿)
+                    query = query.filter_by(owner_id=owner_id)
+            elif current_user_id is None:
+                # 沒有認證：允許查詢但可能需要其他限制
+                query = query.filter_by(owner_id=owner_id)
+            else:
+                # 查詢其他用戶的動物，只能看已發布的
+                query = query.filter_by(owner_id=owner_id, status=AnimalStatus.PUBLISHED)
+        elif created_by:
+            query = query.filter_by(created_by=created_by)
+        else:
+            # 預設只顯示已發布的動物
+            if not status:
+                status = AnimalStatus.PUBLISHED.value
+        
+        # 狀態篩選
+        if status:
+            try:
+                status_enum = AnimalStatus(status) if isinstance(status, str) else status
+                query = query.filter_by(status=status_enum)
+            except ValueError:
+                raise ValidationError('無效的狀態值')
+        
+        # 物種篩選
+        if species:
+            try:
+                species_enum = Species(species) if isinstance(species, str) else species
+                query = query.filter_by(species=species_enum)
+            except ValueError:
+                raise ValidationError('無效的物種值')
+        
+        # 性別篩選
+        if sex:
+            try:
+                sex_enum = Sex(sex) if isinstance(sex, str) else sex
+                query = query.filter_by(sex=sex_enum)
+            except ValueError:
+                raise ValidationError('無效的性別值')
+        
+        # 收容所篩選
+        if shelter_id:
+            query = query.filter_by(shelter_id=shelter_id)
+        
+        # 來源類型篩選
+        if source_type:
+            if source_type == 'shelter':
+                query = query.filter(Animal.shelter_id.isnot(None))
+            elif source_type == 'personal':
+                query = query.filter(Animal.owner_id.isnot(None))
+        
+        # 地區篩選
+        if region:
+            shelter_region_condition = db.exists().where(
+                db.and_(
+                    Animal.shelter_id == Shelter.shelter_id,
+                    Shelter.region.like(f'%{region}%')
+                )
+            )
+            
+            owner_region_condition = db.exists().where(
+                db.and_(
+                    Animal.owner_id == User.user_id,
+                    User.region.like(f'%{region}%')
+                )
+            )
+            
+            query = query.filter(
+                db.or_(shelter_region_condition, owner_region_condition)
+            )
+        
+        # 年齡篩選
+        if min_age is not None or max_age is not None:
+            age_in_months = func.timestampdiff(
+                db.text('MONTH'),
+                Animal.dob,
+                func.curdate()
+            )
+            
+            if min_age is not None:
+                query = query.filter(age_in_months >= min_age)
+            
+            if max_age is not None:
+                query = query.filter(age_in_months <= max_age)
+        
+        # 關鍵字搜尋
+        if q:
+            query = query.filter(
+                db.or_(
+                    Animal.name.like(f'%{q}%'),
+                    Animal.description.like(f'%{q}%'),
+                    Animal.breed.like(f'%{q}%')
+                )
+            )
+        
+        # 分頁
+        pagination = query.order_by(Animal.created_at.desc()).paginate(
+            page=page,
+            per_page=per_page,
+            error_out=False
+        )
+        
+        return {
+            'animals': [animal.to_dict(include_relations=True) for animal in pagination.items],
+            'total': pagination.total,
+            'page': pagination.page,
+            'per_page': pagination.per_page,
+            'pages': pagination.pages
+        }
+    
+    @staticmethod
+    def get_animal(animal_id: int) -> Animal:
+        """
+        獲取單一動物詳細資訊
+        
+        Args:
+            animal_id: 動物 ID
+            
+        Returns:
+            Animal: 動物物件
+            
+        Raises:
+            NotFoundError: 動物不存在
+        """
+        animal = Animal.query.filter_by(animal_id=animal_id, deleted_at=None).first()
+        
+        if not animal:
+            raise NotFoundError('動物不存在')
+        
+        return animal
 
 
 # 創建全局實例

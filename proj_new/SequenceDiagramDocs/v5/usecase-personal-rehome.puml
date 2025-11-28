@@ -1,0 +1,192 @@
+﻿@startuml usecase-personal-rehome
+
+title 使用案例1: 個人送養發佈流程 (BP-REHOME-002)
+
+actor "一般會員" as User
+participant "RehomeForm.vue" as Vue
+participant "animals.ts" as API
+participant "animals.py" as Blueprint
+participant "animal_service.py" as Service
+participant "Animal Model" as AnimalModel
+participant "AnimalImage Model" as ImageModel
+participant "Database" as DB
+participant "FileUploader.vue" as Uploader
+participant "uploads.py" as UploadAPI
+participant "minio_helper.py" as MinIO
+
+== 步驟1: 進入表單 ==
+User -> Vue: 點選「發佈送養」
+activate Vue
+Vue -> User: 畫面初始化，顯示空白表單\n(步驟1:基本資訊)
+
+== 步驟2: 填寫基本資訊 ==
+User -> Vue: 填寫動物資訊
+note right of User
+  必填欄位：
+  - 動物名稱
+  - 物種 (CAT/DOG)
+  - 性別 (MALE/FEMALE)
+  - 年齡
+  - 所在縣市
+  - 描述
+  選填欄位：
+  - 品種
+  - 顏色
+  - 出生日期
+  - 健康狀況
+  - 行為特徵
+end note
+
+User -> Vue: 點擊「下一步」
+Vue -> Vue: validateStep(0)\n驗證必填欄位
+
+== 步驟3: 上傳照片 ==
+Vue -> User: 顯示步驟2:上傳照片
+User -> Vue: 選擇動物圖片\n(至少1張，JPG/PNG/GIF，單檔最大5MB)
+
+User -> Vue: 點擊「儲存草稿」
+note right: 草稿可在任何步驟儲存
+
+Vue -> API: createAnimal(formData)
+activate API
+API -> Blueprint: POST /animals\n{name, species, breed, sex, dob, color, description, status: "DRAFT"}
+activate Blueprint
+Blueprint -> Blueprint: @jwt_required()\n驗證 JWT Token
+Blueprint -> Service: create_animal(user, data)
+activate Service
+
+Service -> Service: 判斷動物歸屬
+note right of Service
+  業務邏輯：
+  - 一般會員: owner_id = user_id
+  - 收容所會員: shelter_id = primary_shelter_id
+  - 管理員: 可指定 shelter_id
+end note
+
+Service -> AnimalModel: Animal(\n  name, species, sex, dob,\n  owner_id=user_id,\n  status=DRAFT,\n  created_by=user_id\n)
+AnimalModel -> DB: INSERT INTO animals\n(...) VALUES (...)
+DB --> AnimalModel: animal_id (自動生成)
+AnimalModel --> Service: Animal 物件
+Service --> Blueprint: Animal
+Blueprint --> API: 201 Created\n{message: "動物資料建立成功", animal: {...}}
+deactivate Service
+deactivate Blueprint
+API --> Vue: {animal: {animal_id, ...}}
+deactivate API
+
+Vue -> Vue: 儲存 animal_id\n切換至編輯模式
+Vue -> User: 顯示「草稿已儲存」
+
+== 步驟4: 上傳圖片檔案 ==
+Vue -> Uploader: uploadFiles()
+activate Uploader
+
+loop 每張圖片
+    Uploader -> UploadAPI: POST /uploads/presign\n{entity_type: "ANIMAL", entity_id}
+    activate UploadAPI
+    UploadAPI -> MinIO: generate_presigned_put_url(storage_key)
+    activate MinIO
+    MinIO --> UploadAPI: presigned_url (有效期15分鐘)
+    deactivate MinIO
+    UploadAPI --> Uploader: {url, storage_key, mime_type}
+    deactivate UploadAPI
+    
+    Uploader -> MinIO: PUT presigned_url\n上傳檔案二進位資料
+    activate MinIO
+    MinIO --> Uploader: 200 OK
+    deactivate MinIO
+    
+    Uploader -> API: addAnimalImage(animal_id,\n  {image_url, storage_key, mime_type})
+    activate API
+    API -> Blueprint: POST /animals/{animal_id}/images\n{storage_key, image_url, mime_type}
+    activate Blueprint
+    Blueprint -> Service: add_image(animal_id, user,\n  storage_key, url, mime_type)
+    activate Service
+    Service -> Service: 檢查權限\ncan_manage_animal(user, animal)
+    Service -> ImageModel: AnimalImage(\n  animal_id, storage_key,\n  url, mime_type, order\n)
+    ImageModel -> DB: INSERT INTO animal_images
+    DB --> ImageModel: animal_image_id
+    ImageModel --> Service: AnimalImage
+    Service --> Blueprint: AnimalImage
+    Blueprint --> API: 201 Created\n{message: "圖片已新增", image: {...}}
+    deactivate Service
+    deactivate Blueprint
+    API --> Uploader: {image: {...}}
+    deactivate API
+end
+
+Uploader --> Vue: onPhotosUploaded(photos)
+deactivate Uploader
+Vue -> User: 顯示已上傳 N 張照片
+
+== 步驟5: 上傳醫療紀錄 (選填) ==
+User -> Vue: 點擊「下一步」到步驟3
+Vue -> User: 顯示醫療紀錄管理介面
+opt 使用者選擇新增醫療紀錄
+    User -> Vue: 點擊「新增醫療記錄」
+    Vue -> User: 顯示醫療紀錄表單 Modal
+    User -> Vue: 填寫醫療紀錄\n(類型、日期、提供者、詳細說明)
+    User -> Vue: 上傳相關證明文件
+    User -> Vue: 點擊「新增」
+    note right: 醫療紀錄會在提交時\n一併儲存到資料庫
+end
+
+== 步驟6: 確認送出 ==
+User -> Vue: 點擊「下一步」到步驟4
+Vue -> User: 顯示資訊預覽
+note right of User
+  預覽內容：
+  - 基本資訊摘要
+  - 已上傳照片數量
+  - 醫療資訊摘要
+  - 提示：審核後才公開
+end note
+
+User -> Vue: 檢視資訊預覽
+User -> Vue: 點擊「確認送出」
+
+Vue -> API: submitAnimal(animal_id)
+activate API
+API -> Blueprint: POST /animals/{animal_id}/submit
+activate Blueprint
+Blueprint -> Service: submit_for_review(animal_id, user)
+activate Service
+
+Service -> DB: SELECT * FROM animals\nWHERE animal_id = ? AND deleted_at IS NULL
+DB --> Service: Animal 資料
+Service -> Service: 檢查權限\ncan_submit_animal_for_review(user, animal)
+Service -> Service: 檢查狀態 (必須是 DRAFT)
+Service -> AnimalModel: animal.status = SUBMITTED\nanimal.updated_at = now()
+AnimalModel -> DB: UPDATE animals\nSET status="SUBMITTED", updated_at=?\nWHERE animal_id=?
+DB --> AnimalModel: 1 row affected
+AnimalModel --> Service: Animal
+Service --> Blueprint: Animal
+Blueprint --> API: 200 OK\n{message: "送養資料已提交審核", animal: {...}}
+deactivate Service
+deactivate Blueprint
+API --> Vue: {animal: {status: "SUBMITTED", ...}}
+deactivate API
+
+Vue -> Vue: submissionSuccess = true
+Vue -> User: 顯示成功訊息
+note right of User
+  送出成功提示：
+  「送養已提交成功！」
+  「資訊將進入審核，
+  審核通過後才會公開顯示」
+  
+  按鈕：[回首頁]
+end note
+deactivate Vue
+
+== 後置條件確認 ==
+note over User, DB
+  ✓ 動物資料存進資料庫
+  ✓ 送養狀態設為「審核中」(SUBMITTED)
+  ✓ 至少一張照片已上傳
+  ✓ 醫療紀錄已儲存(如有填寫)
+  ✓ 等待管理員審核通過後公開顯示
+  ✓ 若存檔失敗，顯示錯誤訊息
+end note
+
+@enduml

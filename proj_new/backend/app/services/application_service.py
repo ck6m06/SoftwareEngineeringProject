@@ -3,7 +3,8 @@ Application Service - 申請業務邏輯服務
 集中管理所有申請相關的業務邏輯
 """
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
+from sqlalchemy import or_
 from app import db
 from app.models.application import Application, ApplicationStatus, ApplicationType
 from app.models.user import User, UserRole
@@ -18,6 +19,119 @@ from app.services.notification_service import notification_service
 
 class ApplicationService:
     """申請業務邏輯服務類"""
+    
+    @staticmethod
+    def list_applications(current_user: User, filters: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        查詢申請列表
+        
+        業務邏輯：
+        1. 管理員可以看到所有申請
+        2. 送養人可以看到針對自己動物的申請
+        3. 申請人可以看到自己提交的申請
+        4. 支援多種查詢模式 (all/review/my)
+        
+        Args:
+            current_user: 當前用戶
+            filters: 過濾條件
+                - mode: 查詢模式 ('all', 'review', 'my')
+                - status: 申請狀態
+                - animal_id: 動物 ID
+                - applicant_id: 申請人 ID
+                - page: 頁碼
+                - per_page: 每頁筆數
+                
+        Returns:
+            Dict: 包含申請列表和分頁資訊
+            
+        Raises:
+            ValidationError: 過濾條件無效
+            PermissionDeniedError: 無權限查看指定申請
+        """
+        # 分頁參數
+        page = filters.get('page', 1)
+        per_page = filters.get('per_page', 20)
+        mode = filters.get('mode', 'all')
+        
+        # 基礎查詢
+        query = Application.query.filter_by(deleted_at=None)
+        
+        # 權限過濾邏輯
+        if current_user.role == UserRole.ADMIN:
+            # 管理員可以看到所有申請
+            pass
+        else:
+            # 非管理員: 查詢自己擁有的動物ID列表
+            owned_animal_ids = []
+            
+            # 1. 查詢個人送養動物
+            personal_animals = db.session.query(Animal.animal_id).filter_by(
+                owner_id=current_user.user_id,
+                deleted_at=None
+            ).all()
+            owned_animal_ids.extend([aid[0] for aid in personal_animals])
+            
+            # 2. 如果是收容所成員，查詢所屬收容所的動物
+            if current_user.role == UserRole.SHELTER_MEMBER and current_user.primary_shelter_id:
+                shelter_animals = db.session.query(Animal.animal_id).filter_by(
+                    shelter_id=current_user.primary_shelter_id,
+                    deleted_at=None
+                ).all()
+                owned_animal_ids.extend([aid[0] for aid in shelter_animals])
+            
+            # 根據模式決定過濾條件
+            if mode == 'review':
+                # 審核模式: 只顯示別人對自己動物的申請
+                query = query.filter(Application.animal_id.in_(owned_animal_ids))
+            elif mode == 'my':
+                # 我的申請模式: 只顯示自己提交的申請
+                query = query.filter_by(applicant_id=current_user.user_id)
+            else:
+                # 默認模式: 自己提交的申請 OR 針對自己動物的申請
+                query = query.filter(
+                    or_(
+                        Application.applicant_id == current_user.user_id,
+                        Application.animal_id.in_(owned_animal_ids)
+                    )
+                )
+        
+        # 狀態過濾
+        if filters.get('status'):
+            try:
+                status_enum = ApplicationStatus(filters['status'])
+                query = query.filter_by(status=status_enum)
+            except ValueError:
+                raise ValidationError(f'無效的狀態值: {filters["status"]}')
+        
+        # 動物 ID 過濾
+        if filters.get('animal_id'):
+            query = query.filter_by(animal_id=filters['animal_id'])
+        
+        # 申請人 ID 過濾
+        if filters.get('applicant_id'):
+            requested_applicant_id = filters['applicant_id']
+            
+            # 非管理員只能查詢自己的申請
+            if current_user.role != UserRole.ADMIN:
+                if requested_applicant_id != current_user.user_id:
+                    raise PermissionDeniedError('無權限查看其他用戶的申請')
+                query = query.filter_by(applicant_id=current_user.user_id)
+            else:
+                # 只有管理員可以查詢指定用戶的申請
+                query = query.filter_by(applicant_id=requested_applicant_id)
+        
+        # 執行分頁查詢
+        pagination = query.order_by(Application.created_at.desc()).paginate(
+            page=page, per_page=per_page, error_out=False
+        )
+        
+        return {
+            'items': [app.to_dict(include_relations=True) for app in pagination.items],
+            'total': pagination.total,
+            'page': page,
+            'per_page': per_page,
+            'pages': pagination.pages
+        }
     
     @staticmethod
     def create_application(applicant: User, data: Dict[str, Any], 

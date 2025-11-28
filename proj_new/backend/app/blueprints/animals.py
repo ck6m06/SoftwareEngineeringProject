@@ -33,175 +33,44 @@ def list_animals():
         - page: 頁碼 (預設 1)
         - per_page: 每頁筆數 (預設 20, 最大 100)
     """
-    # 取得查詢參數
-    species = request.args.get('species')
-    sex = request.args.get('sex')
-    status = request.args.get('status')
-    shelter_id = request.args.get('shelter_id')
-    owner_id = request.args.get('owner_id', type=int)
-    created_by = request.args.get('created_by', type=int)
-    source_type = request.args.get('source_type')  # 'shelter' 或 'personal'
-    region = request.args.get('region')  # 地區/縣市
-    min_age = request.args.get('min_age', type=int)  # 最小年齡(月數)
-    max_age = request.args.get('max_age', type=int)  # 最大年齡(月數)
-    q = request.args.get('q', '').strip()
-    page = request.args.get('page', 1, type=int)
-    per_page = min(request.args.get('per_page', 20, type=int), 100)
-    
-    # 建立查詢
-    query = Animal.query.filter_by(deleted_at=None)
-    
-    # 如果有 owner_id 或 created_by 參數，查詢該用戶的所有動物(包含草稿)
-    # 否則預設只顯示已發布的動物
-    if owner_id:
-        # 特殊處理：如果查詢者是收容所成員，同時查詢個人動物和收容所動物
-        try:
-            # 檢查是否有 JWT token
-            verify_jwt_in_request(optional=True)
-            current_user_id = int(get_jwt_identity()) if get_jwt_identity() else None
-            
-            if current_user_id == owner_id:  # 查詢自己的動物
-                current_user = db.session.get(User, current_user_id)
-                
-                if current_user and current_user.role == UserRole.SHELTER_MEMBER and current_user.primary_shelter_id:
-                    # 收容所成員：查詢個人動物 + 收容所動物
-                    query = query.filter(
-                        db.or_(
-                            Animal.owner_id == owner_id,
-                            Animal.shelter_id == current_user.primary_shelter_id
-                        )
-                    )
-                else:
-                    # 一般用戶：只查詢個人動物 (包含草稿)
-                    query = query.filter_by(owner_id=owner_id)
-            elif current_user_id is None:
-                # 沒有認證但查詢特定用戶的動物：允許查詢該用戶的所有動物
-                # 這是為了處理前端認證狀態異常的情況
-                query = query.filter_by(owner_id=owner_id)
-            else:
-                # 查詢其他用戶的動物，只能看已發布的
-                query = query.filter_by(owner_id=owner_id, status=AnimalStatus.PUBLISHED)
-        except Exception as e:
-            # 發生錯誤時的備用方案：如果是查詢特定用戶的動物，允許查看所有狀態
-            query = query.filter_by(owner_id=owner_id)
-    elif created_by:
-        query = query.filter_by(created_by=created_by)
-    else:
-        # 預設只顯示已發布的動物
-        if not status:
-            status = AnimalStatus.PUBLISHED.value
-    
-    # 狀態篩選
-    if status:
-        try:
-            query = query.filter_by(status=AnimalStatus(status))
-        except ValueError:
-            abort(400, message='無效的狀態值')
-    
-    # 篩選條件
-    if species:
-        try:
-            query = query.filter_by(species=Species(species))
-        except ValueError:
-            abort(400, message='無效的物種值')
-    
-    if sex:
-        try:
-            query = query.filter_by(sex=Sex(sex))
-        except ValueError:
-            abort(400, message='無效的性別值')
-    
-    if shelter_id:
-        query = query.filter_by(shelter_id=shelter_id)
-    
-    # 來源類型篩選
-    if source_type:
-        if source_type == 'shelter':
-            # 只顯示收容所動物
-            query = query.filter(Animal.shelter_id.isnot(None))
-        elif source_type == 'personal':
-            # 只顯示個人送養動物
-            query = query.filter(Animal.owner_id.isnot(None))
-    
-    # 地區篩選 - 需要 JOIN 用戶和收容所資料來取得地區資訊
-    if region:
-        from app.models.user import User
-        from app.models.shelter import Shelter
+    try:
+        # 檢查是否有 JWT token (可選)
+        verify_jwt_in_request(optional=True)
+        current_user_id = int(get_jwt_identity()) if get_jwt_identity() else None
         
-        # 建立子查詢條件
-        shelter_region_condition = db.exists().where(
-            db.and_(
-                Animal.shelter_id == Shelter.shelter_id,
-                Shelter.region.like(f'%{region}%')
-            )
-        )
+        # 收集所有篩選參數
+        filters = {
+            'species': request.args.get('species'),
+            'sex': request.args.get('sex'),
+            'status': request.args.get('status'),
+            'shelter_id': request.args.get('shelter_id'),
+            'owner_id': request.args.get('owner_id', type=int),
+            'created_by': request.args.get('created_by', type=int),
+            'source_type': request.args.get('source_type'),
+            'region': request.args.get('region'),
+            'min_age': request.args.get('min_age', type=int),
+            'max_age': request.args.get('max_age', type=int),
+            'q': request.args.get('q', '').strip(),
+            'page': request.args.get('page', 1, type=int),
+            'per_page': request.args.get('per_page', 20, type=int)
+        }
         
-        owner_region_condition = db.exists().where(
-            db.and_(
-                Animal.owner_id == User.user_id,
-                User.region.like(f'%{region}%')
-            )
-        )
-        
-        query = query.filter(
-            db.or_(shelter_region_condition, owner_region_condition)
-        )
-    
-    # 年齡篩選 - 計算動物年齡(月數)
-    if min_age is not None or max_age is not None:
-        from sqlalchemy import func, extract
-        
-        # 計算年齡：當前日期 - 出生日期，轉換為月數
-        # TIMESTAMPDIFF(MONTH, dob, CURDATE()) 計算月數差
-        age_in_months = func.timestampdiff(
-            db.text('MONTH'),
-            Animal.dob,
-            func.curdate()
-        )
-        
-        if min_age is not None:
-            query = query.filter(age_in_months >= min_age)
-        
-        if max_age is not None:
-            query = query.filter(age_in_months <= max_age)
-    
-    # 關鍵字搜尋
-    if q:
-        query = query.filter(
-            db.or_(
-                Animal.name.like(f'%{q}%'),
-                Animal.description.like(f'%{q}%'),
-                Animal.breed.like(f'%{q}%')
-            )
-        )
-    
-    # 分頁
-    pagination = query.order_by(Animal.created_at.desc()).paginate(
-        page=page,
-        per_page=per_page,
-        error_out=False
-    )
-    
-    return jsonify({
-        'animals': [animal.to_dict(include_relations=True) for animal in pagination.items],
-        'total': pagination.total,
-        'page': pagination.page,
-        'per_page': pagination.per_page,
-        'pages': pagination.pages
-    }), 200
+        result = animal_service.list_animals(filters, current_user_id)
+        return jsonify(result), 200
+    except BusinessException as e:
+        return jsonify({'message': str(e)}), e.status_code
+    except Exception as e:
+        return jsonify({'message': f'系統錯誤: {str(e)}'}), 500
 
 
 @animals_bp.route('/<int:animal_id>', methods=['GET'])
 def get_animal(animal_id):
     """取得單一動物詳細資訊"""
     try:
-        animal = Animal.query.filter_by(animal_id=animal_id, deleted_at=None).first()
-        
-        if not animal:
-            abort(404, message='動物不存在')
-        
+        animal = animal_service.get_animal(animal_id)
         return jsonify(animal.to_dict(include_relations=True)), 200
-        
+    except BusinessException as e:
+        return jsonify({'message': str(e)}), e.status_code
     except Exception as e:
         return jsonify({'message': f'系統錯誤: {str(e)}'}), 500
 

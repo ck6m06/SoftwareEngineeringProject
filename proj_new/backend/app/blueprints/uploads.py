@@ -9,6 +9,8 @@ import uuid
 from app import db
 from app.models.others import Attachment
 from app.models.user import User
+from app.services.attachment_service import attachment_service
+from app.exceptions import BusinessException
 from config import Config
 
 # MinIO 客戶端初始化
@@ -133,37 +135,15 @@ def create_attachment():
         current_user_id = int(get_jwt_identity())
         data = request.get_json()
         
-        # 驗證必填欄位
-        required_fields = ['object_key', 'filename', 'content_type', 'size']
-        for field in required_fields:
-            if not data.get(field):
-                abort(400, message=f'缺少必填欄位: {field}')
-        
-        # 驗證檔案是否存在於 MinIO
-        try:
-            stat = minio_client.stat_object(
-                bucket_name=Config.MINIO_BUCKET,
-                object_name=data['object_key']
-            )
-        except Exception:
-            abort(404, message='檔案不存在於儲存系統')
-        
-        # 建立附件記錄
-        attachment = Attachment(
-            object_key=data['object_key'],
-            filename=data['filename'],
-            content_type=data['content_type'],
-            size=data['size'],
-            uploaded_by_id=current_user_id,
-            entity_type=data.get('entity_type'),  # 'animal', 'application', etc.
-            entity_id=data.get('entity_id')
+        # 呼叫 Service 層
+        attachment = attachment_service.create_attachment(
+            user_id=current_user_id,
+            data=data,
+            minio_client=minio_client
         )
         
-        db.session.add(attachment)
-        db.session.commit()
-        
-        # 生成永久的公開 URL
-        public_url = f"http://{Config.MINIO_EXTERNAL_ENDPOINT or 'localhost:9000'}/{Config.MINIO_BUCKET}/{data['object_key']}"
+        # 生成公開 URL
+        public_url = attachment_service.generate_public_url(attachment.object_key)
         
         return jsonify({
             'message': '附件已建立',
@@ -171,6 +151,8 @@ def create_attachment():
             'download_url': public_url
         }), 201
         
+    except BusinessException as e:
+        return jsonify({'message': str(e)}), e.status_code
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
@@ -184,24 +166,19 @@ def get_attachment(attachment_id):
     ---
     """
     try:
-        current_user_id = int(get_jwt_identity())
+        # 呼叫 Service 層
+        attachment = attachment_service.get_attachment(attachment_id)
         
-        attachment = Attachment.query.filter_by(
-            attachment_id=attachment_id,
-            deleted_at=None
-        ).first()
-        
-        if not attachment:
-            abort(404, message='附件不存在')
-        
-        # 生成永久的公開 URL
-        public_url = f"http://{Config.MINIO_EXTERNAL_ENDPOINT or 'localhost:9000'}/{Config.MINIO_BUCKET}/{attachment.object_key}"
+        # 生成公開 URL
+        public_url = attachment_service.generate_public_url(attachment.object_key)
         
         return jsonify({
             'attachment': attachment.to_dict(),
             'download_url': public_url
         }), 200
         
+    except BusinessException as e:
+        return jsonify({'message': str(e)}), e.status_code
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -216,29 +193,18 @@ def delete_attachment(attachment_id):
     """
     try:
         current_user_id = int(get_jwt_identity())
-        current_user = User.query.get(current_user_id)
+        current_user = db.session.get(User, current_user_id)
         
-        attachment = Attachment.query.filter_by(
-            attachment_id=attachment_id,
-            deleted_at=None
-        ).first()
+        if not current_user:
+            return jsonify({'message': '用戶不存在'}), 404
         
-        if not attachment:
-            abort(404, message='附件不存在')
-        
-        # 權限檢查: 上傳者本人或管理員
-        from app.models.user import UserRole
-        if attachment.uploaded_by_id != current_user_id and current_user.role != UserRole.ADMIN:
-            abort(403, message='無權限刪除此附件')
-        
-        # 軟刪除
-        from datetime import datetime
-        attachment.deleted_at = datetime.utcnow()
-        
-        db.session.commit()
+        # 呼叫 Service 層
+        attachment_service.delete_attachment(attachment_id, current_user)
         
         return jsonify({'message': '附件已刪除'}), 200
         
+    except BusinessException as e:
+        return jsonify({'message': str(e)}), e.status_code
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 500

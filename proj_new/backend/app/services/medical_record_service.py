@@ -4,9 +4,10 @@ Medical Record Service - 醫療紀錄業務邏輯服務
 """
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
+from sqlalchemy import or_, and_, func
 from app import db
 from app.models.medical_record import MedicalRecord, RecordType
-from app.models.animal import Animal
+from app.models.animal import Animal, AnimalStatus
 from app.models.user import User, UserRole
 from app.models.others import Attachment
 from app.exceptions import (
@@ -17,6 +18,119 @@ from app.services.permission_service import permission_service
 
 class MedicalRecordService:
     """醫療紀錄服務類"""
+    
+    @staticmethod
+    def list_animals_for_medical_records(user: User, filters: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        獲取當前用戶有權限管理醫療紀錄的動物列表
+        
+        業務邏輯：
+        1. 管理員可以看到所有動物
+        2. 收容所成員可以看到自己的動物和所屬收容所的動物
+        3. 一般用戶只能看到自己的動物
+        
+        Args:
+            user: 當前用戶
+            filters: 過濾條件
+                - name: 名稱 (部分匹配)
+                - species: 物種 (CAT/DOG)
+                - breed: 品種 (部分匹配)
+                - min_age: 最小年齡 (月數)
+                - max_age: 最大年齡 (月數)
+                - adopted: 是否已領養 (true/false)
+                
+        Returns:
+            Dict: 包含動物列表和總數
+        """
+        # 基本查詢：排除已刪除的動物
+        query = Animal.query.filter_by(deleted_at=None)
+        
+        # 權限過濾
+        if user.role == UserRole.ADMIN:
+            # 管理員可以看到所有動物
+            pass
+        elif user.role == UserRole.SHELTER_MEMBER:
+            # 收容所成員可以看到：
+            # 1. 自己擁有的動物 (個人送養)
+            # 2. 所屬收容所的動物
+            conditions = [Animal.owner_id == user.user_id]
+            if user.primary_shelter_id:
+                conditions.append(Animal.shelter_id == user.primary_shelter_id)
+            query = query.filter(or_(*conditions))
+        else:
+            # 一般用戶只能看到自己的動物
+            query = query.filter_by(owner_id=user.user_id)
+        
+        # 名稱過濾 (部分匹配)
+        if filters.get('name'):
+            query = query.filter(Animal.name.ilike(f"%{filters['name']}%"))
+        
+        # 品種過濾 (部分匹配)
+        if filters.get('breed'):
+            query = query.filter(Animal.breed.ilike(f"%{filters['breed']}%"))
+        
+        # 物種過濾
+        if filters.get('species'):
+            try:
+                query = query.filter(Animal.species == filters['species'].upper())
+            except Exception:
+                pass
+        
+        # 年齡範圍過濾
+        try:
+            if filters.get('min_age') is not None and filters['min_age'] != '':
+                min_age_val = int(filters['min_age'])
+                age_in_months = func.timestampdiff(db.text('MONTH'), Animal.dob, func.curdate())
+                query = query.filter(age_in_months >= min_age_val)
+            
+            if filters.get('max_age') is not None and filters['max_age'] != '':
+                max_age_val = int(filters['max_age'])
+                age_in_months = func.timestampdiff(db.text('MONTH'), Animal.dob, func.curdate())
+                query = query.filter(age_in_months <= max_age_val)
+        except (ValueError, TypeError):
+            pass
+        
+        # 是否已領養過濾
+        if filters.get('adopted') is not None:
+            adopted_val = str(filters['adopted']).lower()
+            
+            # 準備 exists 子查詢：檢查是否存在待審核的申請
+            from app.models.application import Application, ApplicationStatus
+            
+            pending_app_exists = db.session.query(Application).filter(
+                Application.animal_id == Animal.animal_id,
+                Application.deleted_at == None,
+                Application.status.in_([ApplicationStatus.PENDING, ApplicationStatus.UNDER_REVIEW])
+            ).exists()
+            
+            if adopted_val in ('1', 'true', 'yes'):
+                # 已領養：status == ADOPTED OR (owner_id 有值 AND NOT pending_app_exists)
+                query = query.filter(or_(
+                    Animal.status == AnimalStatus.ADOPTED,
+                    and_(Animal.owner_id.isnot(None), ~pending_app_exists)
+                ))
+            elif adopted_val in ('0', 'false', 'no'):
+                # 未領養：status != ADOPTED AND (owner_id 為 NULL OR pending_app_exists)
+                query = query.filter(and_(
+                    Animal.status != AnimalStatus.ADOPTED,
+                    or_(Animal.owner_id.is_(None), pending_app_exists)
+                ))
+        
+        # 執行查詢
+        animals = query.all()
+        
+        # 序列化動物資料並添加圖片信息
+        animals_data = []
+        for animal in animals:
+            animal_dict = animal.to_dict()
+            if hasattr(animal, 'images') and animal.images:
+                animal_dict['images'] = [img.to_dict() for img in animal.images]
+            animals_data.append(animal_dict)
+        
+        return {
+            'animals': animals_data,
+            'total': len(animals_data)
+        }
     
     @staticmethod
     def create_medical_record(animal_id: int, current_user_id: int, record_type: Optional[RecordType],
