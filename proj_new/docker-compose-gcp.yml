@@ -172,8 +172,8 @@ services:
   # 如使用靜態託管服務，可移除此服務
   frontend:
     build:
-      context: .
-      dockerfile: docker/frontend.Dockerfile
+      context: ./frontend
+      dockerfile: ../docker/frontend.Dockerfile
       target: production
       args:
         VITE_API_BASE_URL: ${VITE_API_BASE_URL}
