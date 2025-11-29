@@ -104,14 +104,26 @@ services:
       SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
       SMTP_USE_SSL: ${SMTP_USE_SSL:-false}
       SMTP_FROM: ${SMTP_FROM}
+      # Frontend URL (for email links)
+      FRONTEND_URL: ${FRONTEND_URL}
+      APP_NAME: ${APP_NAME:-Pet Adoption Platform}
     expose:
       - "5000"
     depends_on:
-      - mysql
-      - redis
-      - minio
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
     networks:
       - pet-adoption-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
   # Celery Worker (低並發節省資源)
   celery-worker:
@@ -147,9 +159,12 @@ services:
       SECRET_KEY: ${SECRET_KEY}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
     depends_on:
-      - mysql
-      - redis
-      - backend
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
     networks:
       - pet-adoption-network
 
@@ -180,6 +195,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 40s
 
 volumes:
   mysql-data:

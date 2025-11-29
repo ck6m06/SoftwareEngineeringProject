@@ -76,6 +76,10 @@ class Config:
     SMTP_USE_TLS = os.environ.get('SMTP_USE_TLS', 'true').lower() == 'true'
     SMTP_USE_SSL = os.environ.get('SMTP_USE_SSL', 'false').lower() == 'true'
     SMTP_FROM = os.environ.get('SMTP_FROM', os.environ.get('MAIL_DEFAULT_SENDER', 'no-reply@example.com'))
+    
+    # Frontend URL (for email links)
+    FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:5173')
+    APP_NAME = os.environ.get('APP_NAME', 'Pet Adoption Platform')
 
 
 class DevelopmentConfig(Config):
