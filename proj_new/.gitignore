@@ -63,6 +63,9 @@ logs/
 .env
 .env.local
 .env.*.local
+.env.gcp
+.env.production
+*.env.backup
 backend/.env
 frontend/.env
 
