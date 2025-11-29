@@ -8,6 +8,7 @@ It is written defensively so running it twice is safe in most environments.
 """
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 
 # revision identifiers, used by Alembic.
 revision = '20251103_add_region_columns'
@@ -17,18 +18,18 @@ depends_on = None
 
 
 def upgrade():
+    conn = op.get_bind()
+    inspector = inspect(conn)
+    
     # add shelters.region if not exists
-    try:
+    shelter_columns = [col['name'] for col in inspector.get_columns('shelters')]
+    if 'region' not in shelter_columns:
         op.add_column('shelters', sa.Column('region', sa.String(length=100), nullable=True))
-    except Exception:
-        # likely already exists
-        pass
 
     # add users.region if not exists
-    try:
+    user_columns = [col['name'] for col in inspector.get_columns('users')]
+    if 'region' not in user_columns:
         op.add_column('users', sa.Column('region', sa.String(length=100), nullable=True))
-    except Exception:
-        pass
 
     # populate shelters.region from JSON address->city where possible
     try:
@@ -43,12 +44,14 @@ def upgrade():
 
 
 def downgrade():
+    conn = op.get_bind()
+    inspector = inspect(conn)
+    
     # NOTE: downgrading will drop the columns; keep in mind this removes data.
-    try:
+    shelter_columns = [col['name'] for col in inspector.get_columns('shelters')]
+    if 'region' in shelter_columns:
         op.drop_column('shelters', 'region')
-    except Exception:
-        pass
-    try:
+    
+    user_columns = [col['name'] for col in inspector.get_columns('users')]
+    if 'region' in user_columns:
         op.drop_column('users', 'region')
-    except Exception:
-        pass

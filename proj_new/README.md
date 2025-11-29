@@ -1,10 +1,78 @@
-# 貓狗領養平台 (Pet Adoption Platform)
+# 🐾 貓狗領養平台 (Pet Adoption Platform)
 
-## 專案簡介
+一個完整的貓狗領養平台系統，提供動物瀏覽、送養管理、領養申請、醫療紀錄管理等功能。
 
-這是一個完整的貓狗領養平台系統，提供動物瀏覽、送養管理、領養申請、醫療紀錄管理等功能。
+[![License](https://img.shields.io/badge/license-Educational-blue.svg)](LICENSE)
+[![Docker](https://img.shields.io/badge/docker-supported-2496ED.svg)](https://www.docker.com/)
+[![GCP](https://img.shields.io/badge/GCP-deployable-4285F4.svg)](https://cloud.google.com/)
 
-## 技術架構
+---
+
+## 📑 目錄
+
+- [快速開始](#快速開始)
+- [技術架構](#技術架構)
+- [主要功能](#主要功能模組)
+- [部署指南](#部署)
+- [API 文檔](#api-文檔)
+- [測試帳號](#測試帳號)
+- [開發指南](#開發指南)
+- [專案文檔](#專案文檔)
+
+---
+
+## 🚀 快速開始
+
+### 環境需求
+
+- Docker & Docker Compose（推薦）
+- Node.js 18+ / Python 3.10+（本地開發）
+- MySQL 8.0+（本地開發）
+
+### 一鍵啟動（使用 Docker）
+
+```bash
+# 0. 移除先前部屬docker(可選)
+docker compose down -v
+
+# 1. 複製環境變數檔案
+cp .env.example .env
+cp backend/.env.example backend/.env
+cp frontend/.env.example frontend/.env
+
+# 2. 啟動所有服務
+docker compose up -d
+
+# 3. 初始化資料庫（首次啟動）
+docker compose exec backend flask db upgrade
+
+# 4. 建立測試帳號
+docker compose exec backend python create_test_accounts.py
+
+# 5. 訪問服務
+# 前端: http://localhost:5173
+# 後端 API: http://localhost:5000
+# API 文檔: http://localhost:5000/api/docs
+```
+
+**💡 提示**: 
+- 前端支援熱模組替換 (HMR)，修改程式碼後自動刷新
+- SMTP 已預配置 Gmail，註冊驗證郵件自動發送
+
+### Docker 服務列表
+
+| 服務 | 說明 | 端口 |
+|------|------|------|
+| frontend | Vue 3 開發伺服器 | 5173 |
+| backend | Flask API 伺服器 | 5000 |
+| mysql | MySQL 8.0 資料庫 | 3307 |
+| redis | Redis 快取與消息隊列 | 6379 |
+| minio | MinIO 物件儲存 | 9000, 9001 |
+| celery-worker | Celery 背景任務 | - |
+
+---
+
+## 🏗️ 技術架構
 
 ### 前端 (Frontend)
 - **框架**: Vue 3.4.21 + TypeScript 5.x + Vite 5.4.21
@@ -34,7 +102,9 @@
 - **快取**: Redis 7.x
 - **會話管理**: Redis (Flask Session)
 
-## 專案結構
+---
+
+## 📁 專案結構
 
 ```
 proj_new/
@@ -108,127 +178,23 @@ proj_new/
 └── README.md            # 專案說明
 ```
 
-## 快速開始
+<details>
+<summary><b>查看完整目錄結構</b></summary>
 
-### 環境需求
+詳細的檔案結構請參考專案根目錄，主要包含：
+- `backend/app/blueprints/` - API 路由（auth, animals, applications 等）
+- `backend/app/models/` - 資料庫模型
+- `backend/app/services/` - 業務邏輯層
+- `frontend/src/pages/` - Vue 頁面組件
+- `frontend/src/api/` - API 客戶端
+- `docker/` - Dockerfile 配置
+- `docs/` - 專案文檔
 
-- Node.js 18+
-- Python 3.10+
-- Docker & Docker Compose
-- MySQL 8.0+
+</details>
 
-### 使用 Docker Compose 啟動（推薦）
+---
 
-```bash
-# 移除所有服務(刪除所有SQL和minio圖片資料，重啟)(可選)
-docker compose down -v
-
-# 複製環境變數檔案（包含預配置的Gmail SMTP設定）
-cp .env.example .env
-cp backend/.env.example backend/.env
-cp frontend/.env.example frontend/.env
-
-# 啟動所有服務
-docker compose up -d
-
-# 等待服務完全啟動（約15秒）
-timeout 15  # Windows: timeout /t 15
-
-# 初始化資料庫（首次啟動時）
-docker compose exec backend flask db upgrade
-docker compose exec backend flask db current
-
-# 建立測試帳號（推薦）
-docker compose exec backend python create_test_accounts.py
-
-# 查看服務狀態
-docker compose ps
-
-# 查看日誌
-docker compose logs -f
-```
-
-服務將在以下端口運行：
-- 前端: http://localhost:5173 (Vite dev server with HMR 🔥)
-- 後端 API: http://localhost:5000
-- API 文檔: http://localhost:5000/api/docs
-- MinIO 控制台: http://localhost:9001
-- MySQL: localhost:3307
-- Redis: localhost:6379
-
-**郵件功能**：
-- ✅ **SMTP 已預配置** - 使用 Gmail SMTP (usershelter702@gmail.com)
-- 📧 **註冊驗證郵件** - 新用戶註冊時自動發送
-- 🔐 **密碼重設郵件** - 忘記密碼時發送重設連結
-- 📋 **領養申請通知** - 申請審核結果自動通知
-- 測試 SMTP: `docker-compose exec backend python -c "from app import create_app; from app.services.email_service import email_service; app = create_app(); app.app_context().__enter__(); print('SMTP 測試:', email_service.send_verification_email('test@example.com', 'test', 'token123'))"`
-
-**開發注意事項:**
-- 前端支援熱模組替換 (HMR)，修改程式碼後瀏覽器會自動刷新
-- 後端修改需要重啟容器: `docker-compose restart backend`
-- 完整 Docker 使用指南請參考: [DOCKER_GUIDE.md](DOCKER_GUIDE.md)
-
-### Docker 服務說明
-
-專案使用 Docker Compose 管理以下服務：
-
-| 服務 | 說明 | 端口 |
-|------|------|------|
-| backend | Flask API 伺服器 | 5000 |
-| frontend | Vue 3 開發伺服器 | 5173 |
-| mysql | MySQL 8.0 資料庫 | 3307 |
-| redis | Redis 快取與消息隊列 | 6379 |
-| minio | MinIO 物件儲存 | 9000, 9001 |
-| celery_worker | Celery 背景任務執行器 | - |
-| celery_beat | Celery 定時任務排程器 | - |
-
-**查看服務日誌**:
-```bash
-docker-compose logs -f backend    # 查看後端日誌
-docker-compose logs -f frontend   # 查看前端日誌
-docker-compose logs -f celery_worker  # 查看 Celery 日誌
-```
-
-### 本地開發
-
-#### 後端設置
-
-```bash
-cd backend
-
-# 建立虛擬環境
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-
-# 安裝依賴
-pip install -r requirements.txt
-
-# 設定環境變數
-cp .env.example .env
-
-# 初始化資料庫
-flask db upgrade
-
-# 啟動開發伺服器
-python run.py
-```
-
-#### 前端設置
-
-```bash
-cd frontend
-
-# 安裝依賴
-npm install
-
-# 啟動開發伺服器
-npm run dev
-
-# 建立生產版本
-npm run build
-```
-
-## 主要功能模組
+## ✨ 主要功能模組
 
 ### 1. 動物瀏覽與搜尋
 - 動物列表瀏覽 (分頁、篩選)
@@ -288,7 +254,9 @@ npm run build
 - **異步發送機制** - 使用 Celery 任務隊列，支援重試和錯誤處理
 - **Gmail SMTP 集成** - 預配置 Gmail SMTP 服務，開箱即用
 
-## API 文檔
+---
+
+## 🔌 API 文檔
 
 API 文檔使用 OpenAPI 3.0 規範，可通過以下方式訪問：
 
@@ -334,7 +302,9 @@ API 文檔使用 OpenAPI 3.0 規範，可通過以下方式訪問：
 - `GET /api/admin/users` - 取得用戶列表
 - `POST /api/admin/users/{id}/ban` - 封禁用戶
 
-### 測試帳號
+---
+
+## 👤 測試帳號
 
 #### 快速生成測試帳號
 
@@ -368,7 +338,102 @@ docker-compose exec backend python create_test_accounts.py
 - 測試帳號僅供開發環境使用，生產環境請使用強密碼
 - 完整的測試帳號清單和問題排查請參考 [TEST_ACCOUNTS.md](TEST_ACCOUNTS.md)
 
-## 測試
+---
+
+## 🚀 部署
+
+### 本地開發部署
+
+使用 Docker Compose 進行本地開發，詳見上方「快速開始」章節。
+
+### GCP 雲端部署
+
+專案支援低成本 GCP 部署方案（月費約 $40-50 USD），適合小型專案或測試環境。
+
+#### 部署方案特點
+
+- ✅ **單一 VM 架構** - 所有服務運行在 e2-small 虛擬機
+- ✅ **容器化部署** - 使用 Docker Compose 管理服務
+- ✅ **成本優化** - 不使用 Cloud SQL/Memorystore 等託管服務
+- ✅ **生產就緒** - 包含 Nginx 反向代理、自動備份、監控
+
+#### 快速部署指令
+
+```bash
+# 1. 建立 GCP VM（e2-small, Ubuntu 20.04）
+gcloud compute instances create pet-adoption-vm \
+  --zone=asia-east1-a \
+  --machine-type=e2-small \
+  --boot-disk-size=50GB \
+  --tags=http-server,https-server
+
+# 2. 設定防火牆（僅需開放 80/443）
+gcloud compute firewall-rules create allow-http-https \
+  --allow=tcp:80,tcp:443 \
+  --target-tags=http-server,https-server
+
+# 3. SSH 進入 VM 並安裝 Docker
+sudo apt update && sudo apt install -y docker.io docker-compose git
+
+# 4. 複製專案並配置環境變數
+git clone <your-repo-url>
+cd proj_new
+cp .env.gcp.example .env.gcp
+# 編輯 .env.gcp 填入實際配置
+
+# 5. 啟動服務
+docker compose --env-file .env.gcp -f docker-compose-gcp.yml up -d
+
+# 6. 初始化資料庫
+docker compose -f docker-compose-gcp.yml exec backend flask db upgrade
+docker compose -f docker-compose-gcp.yml exec backend python create_test_accounts.py
+```
+
+#### 成本預估（台灣地區 asia-east1）
+
+| 項目 | 規格 | 月費（USD） |
+|------|------|------------|
+| Compute Engine | e2-small (2 vCPU, 2GB RAM) | $15-20 |
+| 持久磁碟 | 50GB SSD | $8 |
+| 網路流量 | 1TB | $12 |
+| 靜態外部 IP | 標準 IP | $3 |
+| **總計** | | **$38-43** |
+
+#### 詳細部署文檔
+
+- **完整部署指南**: [LOW_COST_DEPLOYMENT.md](LOW_COST_DEPLOYMENT.md)
+  - VM 規格選擇與建立
+  - Nginx 反向代理設定
+  - SSL 憑證配置 (Let's Encrypt)
+  - 自動備份腳本
+  - 監控與告警設定
+  - 成本優化技巧（Preemptible VM、自動關機）
+
+- **配置檔案**:
+  - `docker-compose-gcp.yml` - GCP 生產環境 Docker Compose 配置
+  - `.env.gcp.example` - GCP 環境變數範例
+
+#### 重要注意事項
+
+⚠️ **外部 IP 設定**
+- GCP 預設使用臨時 IP（VM 重啟會改變）
+- **強烈建議**保留靜態 IP ($3/月) 避免頻繁修改配置
+- 或使用免費域名服務（如 Freenom）+ DNS 指向
+
+⚠️ **防火牆規則**
+- 僅需開放 80 (HTTP) 和 443 (HTTPS)
+- SSH (22) 建議限制來源 IP
+- 所有內部服務（MySQL/Redis/MinIO）僅容器內訪問
+
+⚠️ **資料備份**
+- 定期備份 MySQL 資料庫和 MinIO 物件儲存
+- 使用 Cloud Storage 存放備份（詳見 LOW_COST_DEPLOYMENT.md）
+
+詳細的企業級部署指南請參考 [GCP_DEPLOYMENT.md](GCP_DEPLOYMENT.md)（使用託管服務，成本較高）
+
+---
+
+## 🧪 測試
 
 ### 後端測試
 
@@ -385,11 +450,9 @@ npm run test:unit      # 單元測試
 npm run test:e2e       # E2E 測試
 ```
 
-## 部署
+---
 
-詳細的部署指南請參考 [docs/deployment.md](docs/deployment.md)
-
-## 開發指南
+## 💻 開發指南
 
 詳細的開發指南請參考 [docs/development.md](docs/development.md)
 
@@ -409,7 +472,63 @@ UPDATE users SET deleted_at = NULL WHERE email = 'admin@test.com';
 
 更多問題請參考 [docs/development.md](docs/development.md) 的常見問題區塊。
 
-## 最近更新 (2025-10-26)
+### 本地開發設置
+
+#### 後端設置
+
+```bash
+cd backend
+
+# 建立虛擬環境
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+
+# 安裝依賴
+pip install -r requirements.txt
+
+# 設定環境變數
+cp .env.example .env
+
+# 初始化資料庫
+flask db upgrade
+
+# 啟動開發伺服器
+python run.py
+```
+
+#### 前端設置
+
+```bash
+cd frontend
+
+# 安裝依賴
+npm install
+
+# 啟動開發伺服器
+npm run dev
+
+# 建立生產版本
+npm run build
+```
+
+---
+
+## 📚 專案文檔
+
+### 開發文檔
+- [API 文檔](docs/api/README.md) - 完整的 API 使用指南
+- [開發指南](docs/development.md) - 開發流程和常見問題
+- [測試帳號](TEST_ACCOUNTS.md) - 測試帳號清單和問題排查
+- [快速生成測試帳號](CREATE_TEST_ACCOUNTS_GUIDE.md) - 測試帳號生成腳本使用指南
+- [Docker 使用指南](DOCKER_GUIDE.md) - Docker 部署和開發指南
+
+### 部署文檔
+- [GCP 低成本部署指南](LOW_COST_DEPLOYMENT.md) - 單一 VM 部署方案（月費 $40-50）
+- [GCP 企業級部署指南](GCP_DEPLOYMENT.md) - 使用託管服務的高可用架構
+
+---
+
+## 📝 最近更新 (2025-10-26)
 
 ### 新增功能
 - ✅ **通知系統完整實作** - 7 種通知類型，自動觸發機制
@@ -431,15 +550,9 @@ UPDATE users SET deleted_at = NULL WHERE email = 'admin@test.com';
 - 增強表單驗證
 - 完善測試帳號管理
 
-## 專案文檔
+---
 
-- [API 文檔](docs/api/README.md) - 完整的 API 使用指南
-- [開發指南](docs/development.md) - 開發流程和常見問題
-- [測試帳號](TEST_ACCOUNTS.md) - 測試帳號清單和問題排查
-- [快速生成測試帳號](CREATE_TEST_ACCOUNTS_GUIDE.md) - 測試帳號生成腳本使用指南
-- [Docker 使用指南](DOCKER_GUIDE.md) - Docker 部署和開發指南
-
-## 授權
+## 📄 授權
 
 本專案僅供學習使用。
 
@@ -447,7 +560,9 @@ UPDATE users SET deleted_at = NULL WHERE email = 'admin@test.com';
 
 軟體工程專案 - 中期作業
 
-## 版本歷史
+---
+
+## 📋 版本歷史
 
 - v0.3.0 (2025-10-26) - 通知系統、任務審批、用戶管理完整實作
   - 新增通知系統 (7 種通知類型)
