@@ -181,10 +181,9 @@ services:
     restart: always
     environment:
       NODE_ENV: production
-    # 生產環境通過 Load Balancer 訪問
-    expose:
-      - "80"
-    # 移除開發環境的 volumes 和 stdin/tty
+    # 映射到 VM 的 80 端口，允許外部訪問
+    ports:
+      - "80:80"
     depends_on:
       backend:
         condition: service_healthy

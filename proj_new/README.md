@@ -379,9 +379,12 @@ sudo apt update && sudo apt install -y docker.io docker-compose git
 git clone <your-repo-url>
 cd proj_new
 cp .env.gcp.example .env.gcp
-# 編輯 .env.gcp 填入實際配置
+# 編輯 .env.gcp 填入實際配置（替換 YOUR_VM_IP 為實際 IP）
 
-# 5. 啟動服務
+# 5. 首次部署或 Dockerfile 有改動(可選)
+docker compose --env-file .env.gcp -f docker-compose-gcp.yml build --no-cache
+
+# 6. 構建並啟動服務
 docker compose --env-file .env.gcp -f docker-compose-gcp.yml up -d
 
 # 6. 初始化資料庫
