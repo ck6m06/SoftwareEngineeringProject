@@ -43,8 +43,8 @@ RUN npm run build
 # Production stage
 FROM nginx:alpine AS production
 
-# 複製 nginx 設定
-COPY ../docker/nginx.conf /etc/nginx/conf.d/default.conf
+# 複製 nginx 設定 (修正路徑)
+COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
 
 # 複製建構後的檔案
 COPY --from=builder /app/dist /usr/share/nginx/html
