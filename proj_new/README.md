@@ -364,13 +364,13 @@ docker-compose exec backend python create_test_accounts.py
 gcloud compute instances create pet-adoption-vm \
   --zone=asia-east1-a \
   --machine-type=e2-small \
-  --boot-disk-size=50GB \
-  --tags=http-server,https-server
+  --boot-disk-size=20GB \
+  --tags=http-server
 
 # 2. 設定防火牆（僅需開放 80/443）
 gcloud compute firewall-rules create allow-http-https \
   --allow=tcp:80,tcp:443 \
-  --target-tags=http-server,https-server
+  --target-tags=http-server
 
 # 3. SSH 進入 VM 並安裝 Docker
 sudo apt update && sudo apt install -y docker.io docker-compose git
@@ -382,14 +382,14 @@ cp .env.gcp.example .env.gcp
 # 編輯 .env.gcp 填入實際配置（替換 YOUR_VM_IP 為實際 IP）
 
 # 5. 首次部署或 Dockerfile 有改動(可選)
-docker compose --env-file .env.gcp -f docker-compose-gcp.yml build --no-cache
+docker-compose --env-file .env.gcp -f docker-compose-gcp.yml build --no-cache
 
 # 6. 構建並啟動服務
-docker compose --env-file .env.gcp -f docker-compose-gcp.yml up -d
+docker-compose --env-file .env.gcp -f docker-compose-gcp.yml up -d
 
 # 6. 初始化資料庫
-docker compose -f docker-compose-gcp.yml exec backend flask db upgrade
-docker compose -f docker-compose-gcp.yml exec backend python create_test_accounts.py
+docker-compose -f docker-compose-gcp.yml exec backend flask db upgrade
+docker-compose -f docker-compose-gcp.yml exec backend python create_test_accounts.py
 ```
 
 #### 成本預估（台灣地區 asia-east1）
