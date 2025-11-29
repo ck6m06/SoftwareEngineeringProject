@@ -223,7 +223,7 @@ def batch_upload_animals(shelter_id):
                     content_type=file.content_type or 'application/octet-stream'
                 )
                 
-                file_url = f"http://{Config.MINIO_EXTERNAL_ENDPOINT or 'localhost:9000'}/{Config.MINIO_BUCKET}/{object_key}"
+                file_url = f"/minio/{Config.MINIO_BUCKET}/{object_key}"
                 
                 medical_proofs.append({
                     'filename': file.filename,
@@ -258,7 +258,7 @@ def batch_upload_animals(shelter_id):
                     content_type=file.content_type or 'image/jpeg'
                 )
                 
-                file_url = f"http://{Config.MINIO_EXTERNAL_ENDPOINT or 'localhost:9000'}/{Config.MINIO_BUCKET}/{object_key}"
+                file_url = f"/minio/{Config.MINIO_BUCKET}/{object_key}"
                 
                 photos.append({
                     'filename': file.filename,

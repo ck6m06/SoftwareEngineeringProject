@@ -142,9 +142,10 @@ class AttachmentService:
             object_key: MinIO 物件鍵值
             
         Returns:
-            str: 公開 URL
+            str: 公開 URL (使用 Nginx 代理路徑)
         """
-        return f"http://{Config.MINIO_EXTERNAL_ENDPOINT or 'localhost:9000'}/{Config.MINIO_BUCKET}/{object_key}"
+        # 使用 /minio/ 代理路徑，讓前端透過 Nginx 訪問 (GCP 部署兼容)
+        return f"/minio/{Config.MINIO_BUCKET}/{object_key}"
 
 
 # 創建全局實例

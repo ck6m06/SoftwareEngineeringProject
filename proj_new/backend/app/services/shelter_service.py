@@ -344,9 +344,9 @@ class ShelterService:
         except Exception as e:
             raise ValidationError(f'上傳檔案到 MinIO 失敗: {str(e)}')
         
-        # 生成公開 URL (需要從 Config 取得 MINIO_EXTERNAL_ENDPOINT)
+        # 生成公開 URL (使用 Nginx 代理路徑，GCP 部署兼容)
         from config import Config
-        file_url = f"http://{Config.MINIO_EXTERNAL_ENDPOINT or 'localhost:9000'}/{bucket}/{object_key}"
+        file_url = f"/minio/{bucket}/{object_key}"
         
         return {
             'filename': file.filename,

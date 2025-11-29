@@ -18,6 +18,12 @@ export default defineConfig({
         target: 'http://backend:5000',
         changeOrigin: true,
       },
+      '/minio': {
+        // 使用環境變數或容器名稱，支援本地開發和 Docker 環境
+        target: process.env.VITE_MINIO_URL || 'http://minio:9000',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/minio/, ''),
+      },
     },
   },
   build: {

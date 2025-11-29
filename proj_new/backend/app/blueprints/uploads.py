@@ -104,8 +104,8 @@ def upload_direct():
         
         print(f"Upload successful: {object_key}")
         
-        # 生成永久的公開 URL (bucket 已設為 public)
-        public_url = f"http://{Config.MINIO_EXTERNAL_ENDPOINT or 'localhost:9000'}/{Config.MINIO_BUCKET}/{object_key}"
+        # 生成永久的公開 URL (使用 Nginx 代理路徑，GCP 部署兼容)
+        public_url = f"/minio/{Config.MINIO_BUCKET}/{object_key}"
         
         return jsonify({
             'upload_id': str(uuid.uuid4()),

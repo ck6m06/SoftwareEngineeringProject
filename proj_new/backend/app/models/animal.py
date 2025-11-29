@@ -149,14 +149,17 @@ class AnimalImage(db.Model):
         from config import Config
         
         # 使用 storage_key 重新構建永久的公開 URL
-        # 避免使用資料庫中可能過期的 presigned URL
+        # 透過 Nginx 代理路徑訪問 MinIO (GCP 部署兼容)
         if self.storage_key:
-            url = f"http://{Config.MINIO_EXTERNAL_ENDPOINT or 'localhost:9000'}/{Config.MINIO_BUCKET}/{self.storage_key}"
+            # 使用 /minio/ 代理路徑，讓前端能透過 Nginx 訪問
+            url = f"/minio/{Config.MINIO_BUCKET}/{self.storage_key}"
         else:
             # 如果沒有 storage_key,嘗試轉換 URL (向後兼容)
             url = self.url
             if url and 'minio:9000' in url:
-                url = url.replace('minio:9000', Config.MINIO_EXTERNAL_ENDPOINT or 'localhost:9000')
+                url = url.replace(f'minio:9000/{Config.MINIO_BUCKET}', f'/minio/{Config.MINIO_BUCKET}')
+            elif url and Config.MINIO_EXTERNAL_ENDPOINT and Config.MINIO_EXTERNAL_ENDPOINT in url:
+                url = url.replace(f'{Config.MINIO_EXTERNAL_ENDPOINT}/{Config.MINIO_BUCKET}', f'/minio/{Config.MINIO_BUCKET}')
             # 移除可能過期的查詢參數
             if url and '?' in url:
                 url = url.split('?')[0]
