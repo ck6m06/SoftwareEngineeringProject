@@ -32,7 +32,7 @@ WORKDIR /app
 COPY frontend/package*.json ./
 
 # 安裝依賴
-RUN npm ci
+RUN npm install
 
 # 複製原始碼
 COPY frontend/ .
