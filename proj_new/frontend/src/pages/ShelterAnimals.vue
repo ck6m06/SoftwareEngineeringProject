@@ -1388,32 +1388,29 @@ function validateAndFixImageUrl(url: string): string | null {
     return null
   }
   
-  // 如果是完整的 HTTP URL，直接返回
+  // 如果是完整的 HTTP/HTTPS URL，直接返回
   if (url.startsWith('http://') || url.startsWith('https://')) {
     return url
   }
   
-  // 如果是相對路徑，轉換為完整 URL
+  // 如果是相對路徑（/minio/ 或 /api/），直接返回讓瀏覽器處理
+  // 瀏覽器會自動使用當前域名，適用於本地和生產環境
   if (url.startsWith('/')) {
-    const fixedUrl = `http://localhost:5000${url}`
-    return fixedUrl
+    return url
   }
   
-  // 如果是 MinIO storage key，轉換為完整 URL
-  if (url.includes('animals/') || url.includes('images/')) {
-    const fixedUrl = `http://localhost:9000/pet-adoption/${url}`
-    return fixedUrl
+  // 如果是 MinIO storage key（不含前綴斜線），補上 /minio/ 前綴
+  if (url.includes('animals/') || url.includes('images/') || url.includes('uploads/')) {
+    return `/minio/pet-adoption/${url}`
   }
   
   // 如果包含檔案副檔名，假設是儲存路徑
-  if (url.match(/\.(jpg|jpeg|png|gif|webp)$/i)) {
-    const fixedUrl = `http://localhost:9000/pet-adoption/${url}`
-    return fixedUrl
+  if (url.match(/\.(jpg|jpeg|png|gif|webp|pdf|doc|docx)$/i)) {
+    return `/minio/pet-adoption/${url}`
   }
   
-  // 其他情況，嘗試作為相對路徑處理
-  const fixedUrl = `http://localhost:5000/${url}`
-  return fixedUrl
+  // 其他情況，作為相對路徑返回
+  return url.startsWith('/') ? url : `/${url}`
 }
 
 function hasImages(animal: Animal | null): boolean {
@@ -1470,11 +1467,15 @@ function onImageError(event: Event) {
   const originalSrc = img.src
   
   // 嘗試不同的備用 URL
-  if (img.src.includes('localhost:9000')) {
-    // 如果 MinIO URL 失敗，嘗試後端 URL
-    const newSrc = originalSrc.replace('localhost:9000/pet-adoption/', 'localhost:5000/api/images/')
-    img.src = newSrc
-  } else if (img.src.includes('localhost:5000')) {
+  if (img.src.includes('/minio/')) {
+    // 如果 MinIO URL 失敗，嘗試使用 API 代理
+    const path = originalSrc.split('/minio/')[1]
+    if (path) {
+      img.src = `/api/images/${path}`
+    } else {
+      img.src = '/placeholder-animal.jpg'
+    }
+  } else if (img.src.includes('/api/')) {
     // 如果後端 URL 也失敗，使用佔位圖
     img.src = '/placeholder-animal.jpg'
   } else {
@@ -1565,8 +1566,8 @@ function createTestAnimals(): Animal[] {
       images: [
         {
           animal_image_id: 3,
-          storage_key: 'pet-adoption/animals/cat2.webp',
-          url: 'http://localhost:9000/pet-adoption/animals/cat2.webp',
+          storage_key: 'animals/cat2.webp',
+          url: '/minio/pet-adoption/animals/cat2.webp',
           mime_type: 'image/webp',
           order: 1
         }

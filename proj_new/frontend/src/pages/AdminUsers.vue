@@ -286,7 +286,7 @@ async function fetchUsers() {
       params.append('search', searchQuery.value.trim())
     }
 
-    const response = await fetch(`http://localhost:5000/api/admin/users?${params}`, {
+    const response = await fetch(`/api/admin/users?${params}`, {
       headers: {
         'Authorization': `Bearer ${authStore.accessToken}`
       }
@@ -351,7 +351,7 @@ async function confirmBan() {
   
   banning.value = true
   try {
-    const response = await fetch(`http://localhost:5000/api/admin/users/${banTarget.value.user_id}/ban`, {
+    const response = await fetch(`/api/admin/users/${banTarget.value.user_id}/ban`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
