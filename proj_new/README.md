@@ -388,8 +388,8 @@ docker-compose --env-file .env.gcp -f docker-compose-gcp.yml build --no-cache
 docker-compose --env-file .env.gcp -f docker-compose-gcp.yml up -d
 
 # 6. 初始化資料庫
-docker-compose -f docker-compose-gcp.yml exec backend flask db upgrade
-docker-compose -f docker-compose-gcp.yml exec backend python create_test_accounts.py
+docker-compose --env-file .env.gcp -f docker-compose-gcp.yml exec backend flask db upgrade
+docker-compose --env-file .env.gcp -f docker-compose-gcp.yml exec backend python create_test_accounts.py
 ```
 
 #### 成本預估（台灣地區 asia-east1）
