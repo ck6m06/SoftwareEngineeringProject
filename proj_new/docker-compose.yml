@@ -150,8 +150,8 @@ services:
   # Vue 3 前端
   frontend:
     build:
-      context: ./frontend
-      dockerfile: ../docker/frontend.Dockerfile
+      context: .
+      dockerfile: docker/frontend.Dockerfile
       target: development
     container_name: pet-adoption-frontend
     restart: unless-stopped
