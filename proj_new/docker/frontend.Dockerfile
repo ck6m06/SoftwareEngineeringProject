@@ -35,7 +35,7 @@ COPY frontend/package*.json ./
 RUN npm install
 
 # 複製原始碼
-COPY frontend/ .
+COPY frontend/ . 
 
 # 建立生產版本
 RUN npm run build
@@ -43,7 +43,10 @@ RUN npm run build
 # Production stage
 FROM nginx:alpine AS production
 
-# 複製 nginx 設定
+# 移除預設配置
+RUN rm /etc/nginx/conf.d/default.conf
+
+# 複製 nginx 設定（server 區塊）
 COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
 
 # 複製建構後的檔案
