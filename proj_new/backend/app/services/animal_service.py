@@ -505,8 +505,8 @@ class AnimalService:
                     # 一般用戶：只查詢個人動物 (包含草稿)
                     query = query.filter_by(owner_id=owner_id)
             elif current_user_id is None:
-                # 沒有認證：允許查詢但可能需要其他限制
-                query = query.filter_by(owner_id=owner_id)
+                # 沒有認證：只能查看已發布的動物
+                query = query.filter_by(owner_id=owner_id, status=AnimalStatus.PUBLISHED)
             else:
                 # 查詢其他用戶的動物，只能看已發布的
                 query = query.filter_by(owner_id=owner_id, status=AnimalStatus.PUBLISHED)

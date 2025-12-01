@@ -1,0 +1,54 @@
+<testsuites id="" name="" tests="5" failures="0" skipped="0" errors="0" time="21.296243">
+<testsuite name="critical-paths\rehome-publishing.spec.ts" timestamp="2025-12-01T07:59:24.179Z" hostname="chromium" tests="1" failures="0" skipped="0" time="12.805" errors="0">
+<testcase name="P0-2 送養發布流程 › P0-2-003 完整提交流程驗證（使用真實照片）" classname="critical-paths\rehome-publishing.spec.ts" time="12.805">
+<system-out>
+<![CDATA[ 開始 P0-2 完整送養測試（含真實照片）
+🔑 正在登入測試用戶: user@test.com
+✅ 登入成功，已導航到: http://localhost:5173/
+🔗 正在導航到送養表單頁面
+📝 開始填寫基本資訊
+✅ 填入名稱: 小白
+✅ 選擇物種: DOG
+✅ 填入品種: 柴犬
+✅ 選擇性別: MALE
+✅ 填入出生日期: 2023-01-01
+✅ 填入顏色: 棕色
+✅ 填入描述
+✅ 基本資訊填寫完成
+➡️ 點擊下一步
+📸 等待照片上傳步驟載入
+⏳ 等待步驟 2 載入
+📸 開始真實照片上傳
+✅ 測試照片檔案已設置：test_dog.jpg
+✅ 檢測到上傳成功指示
+✅ 真實照片上傳完成
+✅ 照片上傳成功，繼續完整流程
+➡️ 點擊下一步
+🏥 等待醫療紀錄步驟載入
+⏳ 等待步驟 3 載入
+➡️ 點擊下一步
+✅ 等待確認送出步驟載入
+⏳ 等待步驟 4 載入
+📤 提交審核
+⏳ 等待步驟 4 載入
+✅ 已提交審核
+🎉 完整提交流程測試成功！
+]]>
+</system-out>
+</testcase>
+</testsuite>
+<testsuite name="smoke.spec.ts" timestamp="2025-12-01T07:59:24.179Z" hostname="chromium" tests="4" failures="0" skipped="0" time="9.883" errors="0">
+<testcase name="煙霧測試 (Smoke Tests) › 網站基本可訪問性" classname="smoke.spec.ts" time="3.048">
+</testcase>
+<testcase name="煙霧測試 (Smoke Tests) › 後端服務連接" classname="smoke.spec.ts" time="1.242">
+<system-out>
+<![CDATA[✅ 後端服務正常運行
+]]>
+</system-out>
+</testcase>
+<testcase name="煙霧測試 (Smoke Tests) › 基本響應式佈局" classname="smoke.spec.ts" time="2.695">
+</testcase>
+<testcase name="煙霧測試 (Smoke Tests) › 網路資源載入" classname="smoke.spec.ts" time="2.898">
+</testcase>
+</testsuite>
+</testsuites>
