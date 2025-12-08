@@ -187,16 +187,14 @@ class ApplicationService:
         if animal.owner_id == applicant.user_id or animal.created_by == applicant.user_id:
             raise ValidationError('您不能申請自己刊登的動物')
         
-        # 檢查是否已有進行中的申請（任何用戶）
-        any_pending = Application.query.filter_by(
-            animal_id=data['animal_id'],
-            deleted_at=None
-        ).filter(
-            Application.status.in_([ApplicationStatus.PENDING, ApplicationStatus.UNDER_REVIEW])
-        ).first()
-        
-        if any_pending:
-            raise ConflictError('此動物目前有待審核的申請,請等待審核結果後再提出申請')
+        # 冪等性檢查（優先檢查，避免重複檢查的409錯誤）
+        if idempotency_key:
+            existing_app = Application.query.filter_by(
+                idempotency_key=idempotency_key,
+                applicant_id=applicant.user_id
+            ).first()
+            if existing_app:
+                return existing_app
         
         # 檢查當前用戶是否已對此動物提交過申請
         existing = Application.query.filter_by(
@@ -214,6 +212,17 @@ class ApplicationService:
         if existing:
             raise ConflictError('您已對此動物提交申請')
         
+        # 檢查是否已有進行中的申請（任何用戶）
+        any_pending = Application.query.filter_by(
+            animal_id=data['animal_id'],
+            deleted_at=None
+        ).filter(
+            Application.status.in_([ApplicationStatus.PENDING, ApplicationStatus.UNDER_REVIEW])
+        ).first()
+        
+        if any_pending:
+            raise ConflictError('此動物目前有待審核的申請,請等待審核結果後再提出申請')
+        
         # 冪等性檢查
         if idempotency_key:
             existing_app = Application.query.filter_by(
@@ -223,8 +232,15 @@ class ApplicationService:
             if existing_app:
                 return existing_app
         
+        # 為SQLite手動分配application_id（解決BIGINT autoincrement問題）
+        max_id_result = db.session.execute(
+            db.text("SELECT MAX(application_id) FROM applications")
+        ).scalar()
+        next_application_id = (max_id_result or 0) + 1
+        
         # 創建申請
         application = Application(
+            application_id=next_application_id,
             animal_id=data['animal_id'],
             applicant_id=applicant.user_id,
             type=data.get('type', 'ADOPTION'),

@@ -4,6 +4,7 @@ Animal Service - 動物業務邏輯服務
 """
 from datetime import datetime
 from typing import Optional, Dict, Any
+from sqlalchemy import or_, and_, exists, func, text
 from app import db
 from app.models.animal import Animal, AnimalImage, AnimalStatus, Species, Sex
 from app.models.user import User, UserRole
@@ -467,7 +468,7 @@ class AnimalService:
         """
         from app.models.user import User
         from app.models.shelter import Shelter
-        from sqlalchemy import func
+        from app import db
         
         # 取得篩選參數
         species = filters.get('species')
@@ -496,7 +497,7 @@ class AnimalService:
                 if current_user and current_user.role == UserRole.SHELTER_MEMBER and current_user.primary_shelter_id:
                     # 收容所成員：查詢個人動物 + 收容所動物
                     query = query.filter(
-                        db.or_(
+                        or_(
                             Animal.owner_id == owner_id,
                             Animal.shelter_id == current_user.primary_shelter_id
                         )
@@ -554,31 +555,44 @@ class AnimalService:
         
         # 地區篩選
         if region:
-            shelter_region_condition = db.exists().where(
-                db.and_(
+            shelter_region_condition = exists().where(
+                and_(
                     Animal.shelter_id == Shelter.shelter_id,
                     Shelter.region.like(f'%{region}%')
                 )
             )
             
-            owner_region_condition = db.exists().where(
-                db.and_(
+            owner_region_condition = exists().where(
+                and_(
                     Animal.owner_id == User.user_id,
                     User.region.like(f'%{region}%')
                 )
             )
             
             query = query.filter(
-                db.or_(shelter_region_condition, owner_region_condition)
+                or_(shelter_region_condition, owner_region_condition)
             )
         
         # 年齡篩選
         if min_age is not None or max_age is not None:
-            age_in_months = func.timestampdiff(
-                db.text('MONTH'),
-                Animal.dob,
-                func.curdate()
-            )
+            # 檢查資料庫類型以使用正確的日期函數
+            from sqlalchemy.engine import Engine
+            from app import db
+            
+            # 取得資料庫引擎名稱
+            engine_name = db.engine.name
+            
+            if engine_name == 'sqlite':
+                # SQLite 版本：使用 julianday 計算月份差
+                # julianday('now') - julianday(dob) 得到天數差，除以 30.44 約等於月數
+                age_in_months = (func.julianday('now') - func.julianday(Animal.dob)) / 30.44
+            else:
+                # MySQL/PostgreSQL 版本：使用 timestampdiff
+                age_in_months = func.timestampdiff(
+                    text('MONTH'),
+                    Animal.dob,
+                    func.curdate()
+                )
             
             if min_age is not None:
                 query = query.filter(age_in_months >= min_age)
@@ -589,7 +603,7 @@ class AnimalService:
         # 關鍵字搜尋
         if q:
             query = query.filter(
-                db.or_(
+                or_(
                     Animal.name.like(f'%{q}%'),
                     Animal.description.like(f'%{q}%'),
                     Animal.breed.like(f'%{q}%')

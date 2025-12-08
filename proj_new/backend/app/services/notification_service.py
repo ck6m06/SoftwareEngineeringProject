@@ -26,7 +26,14 @@ class NotificationService:
             Notification: 建立的通知物件
         """
         try:
+            # 為SQLite手動分配notification_id（解決BIGINT autoincrement問題）
+            max_id_result = db.session.execute(
+                db.text("SELECT MAX(notification_id) FROM notifications")
+            ).scalar()
+            next_notification_id = (max_id_result or 0) + 1
+            
             notification = Notification(
+                notification_id=next_notification_id,
                 recipient_id=recipient_id,
                 actor_id=actor_id,
                 type=type,
