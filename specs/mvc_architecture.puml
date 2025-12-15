@@ -1,0 +1,224 @@
+@startuml Pet Adoption Platform - MVC Architecture
+
+!theme vibrant
+
+title Pet Adoption Platform - MVC Architecture\n\n
+
+package "Frontend Layer" #LightBlue {
+  package "Vue.js Frontend" {
+    [Router] as router
+    [Pages] as pages
+    [Components] as components
+    [Stores/Composables] as stores
+    [API Client] as api_client
+    
+    pages --> router
+    pages --> components
+    pages --> stores
+    stores --> api_client
+  }
+}
+
+package "Backend Layer" #LightGreen {
+  package "Controllers - Blueprints" {
+    [Auth Controller] as auth_controller
+    [Users Controller] as users_controller
+    [Animals Controller] as animals_controller
+    [Applications Controller] as apps_controller
+    [Shelters Controller] as shelters_controller
+    [Admin Controller] as admin_controller
+    [Notifications Controller] as notif_controller
+    [Medical Records Controller] as medical_controller
+    [Jobs Controller] as jobs_controller
+    [Uploads Controller] as uploads_controller
+  }
+
+  package "Service Layer" {
+    [Auth Service] as auth_service
+    [User Service] as user_service
+    [Animal Service] as animal_service
+    [Application Service] as application_service
+    [Shelter Service] as shelter_service
+    [Admin Service] as admin_service
+    [Notification Service] as notification_service
+    [Medical Record Service] as medical_service
+    [Job Service] as job_service
+    [Email Service] as email_service
+    [Permission Service] as permission_service
+    [Audit Service] as audit_service
+    [Attachment Service] as attachment_service
+  }
+
+  package "Models - ORM" {
+    [User Model] as user_model
+    [Animal Model] as animal_model
+    [Application Model] as application_model
+    [Shelter Model] as shelter_model
+    [Medical Record Model] as medical_model
+    [Notification Model] as notification_model
+    [Pending Registration] as pending_model
+    [Others Model] as others_model
+  }
+  
+  package "Tasks Layer" {
+    [Animal Tasks] as animal_tasks
+    [Email Tasks] as email_tasks
+  }
+  
+  package "Database Access Layer" {
+    [SQLAlchemy ORM] as db_interface
+  }
+  
+  package "Client Access Layer" {
+    [Redis Client/Celery] as cache_interface
+    [MinIO Client] as storage_interface
+  }
+}
+
+package "Infrastructure Layer" #LightYellow {
+  database "MySQL Database" as mysql {
+    [users] as users_table
+    [animals] as animals_table
+    [applications] as apps_table
+    [shelters] as shelters_table
+    
+    users_table -[hidden]right-> animals_table
+    animals_table -[hidden]right-> apps_table
+    apps_table -[hidden]right-> shelters_table
+    
+    [medical_records] as medical_table
+    [notifications] as notifications_table
+    [audit_logs] as audit_table
+    [job_metadata] as jobs_table
+    
+    medical_table -[hidden]right-> notifications_table
+    notifications_table -[hidden]right-> audit_table
+    audit_table -[hidden]right-> jobs_table
+  }
+  
+  queue "Redis/Celery" as redis {
+    [Background Jobs] as bg_jobs
+    [Email Tasks] as email_tasks
+    [Data Export Tasks] as export_tasks
+  }
+  
+  cloud "MinIO - S3 Compatible" as minio {
+    [Animal Photos] as photos
+    [Medical Documents] as documents
+    [Exported Data] as exported
+    
+    photos -[hidden]right-> documents
+    documents -[hidden]right-> exported
+  }
+}
+
+package "External Services" #LightPink {
+  [SMTP Server] as smtp
+  [CDN] as cdn
+}
+
+' Frontend to Backend API connections
+api_client --> auth_controller : HTTP/REST
+api_client --> users_controller
+api_client --> animals_controller
+api_client --> apps_controller
+api_client --> shelters_controller
+api_client --> admin_controller
+api_client --> notif_controller
+api_client --> medical_controller
+api_client --> jobs_controller
+api_client --> uploads_controller
+
+' Controller to Service connections
+auth_controller --> auth_service
+users_controller --> user_service
+animals_controller --> animal_service
+apps_controller --> application_service
+shelters_controller --> shelter_service
+admin_controller --> admin_service
+notif_controller --> notification_service
+medical_controller --> medical_service
+jobs_controller --> job_service
+uploads_controller --> attachment_service
+
+' Service to Service connections
+user_service --> permission_service
+application_service --> audit_service
+auth_service --> email_service
+auth_service --> audit_service
+user_service --> job_service
+notification_service --> audit_service
+
+' Service to Model connections
+auth_service --> user_model
+auth_service --> pending_model
+user_service --> user_model
+animal_service --> animal_model
+application_service --> application_model
+shelter_service --> shelter_model
+notification_service --> notification_model
+medical_service --> medical_model
+job_service --> others_model
+audit_service --> others_model
+
+' Service to Tasks connections
+email_service --> email_tasks
+animal_service --> animal_tasks
+
+' Model to Database Interface connections
+user_model --> db_interface
+animal_model --> db_interface
+application_model --> db_interface
+shelter_model --> db_interface
+medical_model --> db_interface
+notification_model --> db_interface
+pending_model --> db_interface
+others_model --> db_interface
+
+' Database Interface to Infrastructure Database
+db_interface --> mysql : Direct SQLAlchemy Connection
+
+' Background job connections (via Cache Interface)
+job_service --> cache_interface
+user_service --> cache_interface
+
+' Tasks to Infrastructure Interface connections
+email_tasks --> cache_interface
+animal_tasks --> cache_interface
+
+' Services to Infrastructure Interface connections
+animal_service --> storage_interface
+medical_service --> storage_interface
+attachment_service --> storage_interface
+
+' Infrastructure Interface to External Systems
+cache_interface --> redis : Redis/Celery Connection
+storage_interface --> minio : MinIO S3 API
+
+' External service connections
+email_service --> smtp
+
+' CDN connections
+minio --> cdn
+
+note top of "Frontend Layer" : **Presentation Layer**\nVue.js + Vite\nReactive UI Components\nClient-side Routing\nState Management
+
+note top of "Backend Layer" : **Application Layer**\nFlask Blueprints (Controllers)\nService Layer (Business Logic)\nSQLAlchemy Models (ORM)\nCelery Tasks (Background Jobs)\nDatabase Access Layer\nClient Access Layer
+
+note top of "Infrastructure Layer" : **Infrastructure Services**\nMySQL Database (Self-hosted)\nRedis/Celery (Background Processing)\nMinIO (Object Storage)\nSelf-managed Infrastructure Services
+
+note top of "External Services" : **Third-party Services**\nSMTP Server (Email Provider)\nCDN (Content Delivery Network)\nExternal Service Providers
+
+'note right of mysql : **Self-hosted Database**\n- User management\n- Pet information\n- Applications\n- Audit trails\n- Data persistence layer\n- Deployed via Docker Compose
+
+'note right of redis : **Background Processing**\n- Email delivery\n- Data export\n- Image processing\n- Notifications
+
+'note right of minio : **File Storage**\n- Pet photos\n- Medical records\n- User documents\n- Exported data
+
+'note right of db_interface : **SQLAlchemy ORM**\n- Object-Relational Mapping\n- Database abstraction layer\n- Support MySQL/PostgreSQL/SQLite\n- Query builder and session management\n- Built-in connection pooling
+
+'note right of cache_interface : **Redis Client & Celery**\n- Redis for caching and sessions\n- Celery for background job queue\n- Asynchronous task processing\n- Distributed task management\n- Built-in retry mechanisms
+
+'note right of storage_interface : **MinIO Client**\n- S3-compatible object storage\n- Python minio client library\n- File upload/download operations\n- Bucket management and policies\n- Integration with CDN
+
+@enduml

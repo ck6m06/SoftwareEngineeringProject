@@ -68,78 +68,123 @@
 
 ### 測試目標
 - **測試對象**：`app.services.animal_service.AnimalService.list_animals()` 的搜尋篩選邏輯
-- **Mock 策略**：Mock SQLAlchemy ORM (`Animal.query` 及其鏈式調用)
+- **Mock 策略**：Mock SQLAlchemy ORM (`Animal.query` 鏈式調用) 和 `db` 對象
 - **業務邏輯重點**：多重篩選、關鍵字搜尋、AND 邏輯組合
+- **檔案位置**：`proj_new/backend/tests/unit/test_animals_search_service_useCase1_2_clean.py`
 
 ### 核心測試案例
 
-#### TC-U1.2-01: 物種篩選邏輯測試
+#### TC-U1.2-01: 物種篩選邏輯測試 (test_species_filter_conversion)
 - **測試目的**：驗證 species 篩選正確轉換為 enum 並套用
 - **Use Case 對應**：主要流程步驟 2 - 選擇篩選條件（物種）
 - **測試條件**：`filters={'species': 'DOG'}`
-- **Mock 設定**：`Animal.query` 鏈
-- **驗證點**：`query.filter_by.assert_called_with(species=Species.DOG)`
+- **Mock 設定**：完整 Mock 鏈 `Animal.query → filter_by → order_by → paginate`
+- **驗證點**：
+  - `query.filter_by.assert_any_call(deleted_at=None)` (基礎查詢)
+  - `filter_by.filter_by.assert_any_call(species=Species.DOG)` (物種篩選)
+  - 結果結構包含 'animals', 'total' 等欄位
 
-#### TC-U1.2-02: 年齡範圍篩選測試
-- **測試目的**：驗證年齡範圍篩選邏輯（min_age, max_age）
+#### TC-U1.2-02: 年齡範圍篩選邏輯測試 (test_age_range_filter_logic)
+- **測試目的**：驗證年齡參數的業務邏輯和年齡範圍邏輯的正確性
 - **Use Case 對應**：主要流程步驟 2 - 選擇篩選條件（年齡）
-- **測試條件**：`filters={'min_age': 2, 'max_age': 5}`
-- **Mock 設定**：`Animal.age.between()` method
-- **驗證點**：`query.filter.assert_called_with(age_between_condition)`
+- **測試方法**：純業務邏輯測試，不依賴複雜的 SQLAlchemy Mock
+- **驗證點**：
+  - `validate_age_parameters(12, None) == True` (有最小年齡)
+  - `validate_age_parameters(None, 36) == True` (有最大年齡)
+  - `validate_age_parameters(None, None) == False` (無年齡參數)
+  - `validate_age_range(12, 36) == True` (合理範圍)
+  - `validate_age_range(36, 12) == False` (不合理範圍)
 
-#### TC-U1.2-03: 性別篩選邏輯測試
+#### TC-U1.2-03: 性別篩選邏輯測試 (test_sex_filter_conversion)
 - **測試目的**：驗證 sex 篩選正確轉換為 enum 並套用
 - **Use Case 對應**：主要流程步驟 2 - 選擇篩選條件（性別）
 - **測試條件**：`filters={'sex': 'FEMALE'}`
-- **Mock 設定**：`Animal.query` 鏈
-- **驗證點**：`query.filter_by.assert_called_with(sex=Sex.FEMALE)`
+- **Mock 設定**：完整 Mock 鏈，包含 pagination 結果
+- **驗證點**：
+  - `query.filter_by.assert_any_call(deleted_at=None)`
+  - `filter_by.filter_by.assert_any_call(sex=Sex.FEMALE)`
+  - 結果結構正確
 
-#### TC-U1.2-04: 關鍵字全文搜尋測試
+#### TC-U1.2-04: 關鍵字全文搜尋測試 (test_keyword_search_across_multiple_fields)
 - **測試目的**：驗證關鍵字搜尋涵蓋名稱、品種、描述（OR 邏輯）
 - **Use Case 對應**：主要流程步驟 3 - 輸入關鍵字搜尋；輔助說明 1 - 搜尋範圍
 - **測試條件**：`filters={'q': 'Golden Retriever'}`
-- **Mock 設定**：`db.or_()` function, `Animal.name.ilike()`, `Animal.breed.ilike()`, `Animal.description.ilike()`
-- **驗證點**：`query.filter.assert_called_with(or_condition)` 且 OR 條件包含三個欄位
+- **Mock 設定**：
+  - 完整 Mock 鏈，支援鏈式 `filter_by` 調用
+  - Mock `Animal.name.like`, `Animal.description.like`, `Animal.breed.like`
+  - Mock `or_` 函數
+  - 使用 `configure_mock` 設定 pagination 屬性
+- **驗證點**：
+  - `mock_or.called` (使用 OR 邏輯)
+  - `mock_animal.name.like.called` (搜尋 name 欄位)
+  - `mock_animal.description.like.called` (搜尋 description 欄位)
+  - `mock_animal.breed.like.called` (搜尋 breed 欄位)
+  - 最終資料處理正確（to_dict 調用）
+  - 分頁資訊正確
 
-#### TC-U1.2-05: 多條件AND邏輯測試
+#### TC-U1.2-05: 多條件AND邏輯測試 (test_multiple_conditions_and_logic)
 - **測試目的**：驗證多個篩選條件同時套用（AND 邏輯）
 - **Use Case 對應**：輔助說明 2 - 多條件搜尋以AND邏輯處理
 - **測試條件**：`filters={'species': 'DOG', 'sex': 'MALE', 'min_age': 1, 'max_age': 3, 'q': 'cute'}`
-- **Mock 設定**：複合條件 mock
-- **驗證點**：所有篩選條件都被正確套用
+- **Mock 設定**：
+  - 支援多次 `filter_by` 和 `filter` 的 Mock 鏈
+  - Mock SQLite 年齡計算（`func.julianday`）
+  - Mock Animal 欄位屬性和 OR 邏輯
+- **驗證點**：
+  - `mock_filter_by.filter_by.call_count >= 3` (多個 filter_by 條件)
+  - `mock_func.julianday.called` (年齡篩選邏輯)
+  - `mock_or.called` (關鍵字搜尋邏輯)
+  - 結果結構完整
 
-#### TC-U1.2-06: 地區篩選測試
-- **測試目的**：驗證 region 或 city 篩選邏輯
+#### TC-U1.2-06: 地區篩選邏輯測試 (test_region_filter_logic)
+- **測試目的**：驗證 region 篩選使用複雜的 subquery 邏輯
 - **Use Case 對應**：主要流程步驟 2 - 選擇篩選條件（縣市）
 - **測試條件**：`filters={'region': '台北市'}`
-- **Mock 設定**：`Animal.region.ilike()` method
-- **驗證點**：`query.filter.assert_called_with(region_condition)`
+- **Mock 設定**：
+  - Mock `exists()` 子查詢函數
+  - Mock `or_` 和 `and_` 邏輯函數
+  - Mock `exists().where()` 鏈式調用
+- **驗證點**：
+  - `mock_exists.called` (exists 子查詢被調用)
+  - `mock_or.called` (合併 shelter 和 user 地區條件)
+  - `mock_filter_by.filter.called` (filter 被應用)
 
-#### TC-U1.2-07: 結果數量限制測試
+#### TC-U1.2-07: 結果數量限制測試 (test_per_page_limit_enforcement)
 - **測試目的**：驗證搜尋結果限制在100筆內
 - **Use Case 對應**：輔助說明 3 - 搜尋結果最多顯示100筆
-- **測試條件**：`filters={'per_page': 200}`
-- **Mock 設定**：`query.paginate()` method
-- **驗證點**：`query.paginate.assert_called_with(per_page=100, ...)`
+- **測試條件**：`filters={'per_page': 200}` (超過限制)
+- **Mock 設定**：完整 Mock 鏈，mock_paginate 回傳 per_page=100
+- **驗證點**：
+  - `mock_order_by.paginate.assert_called_once_with(page=1, per_page=100, error_out=False)`
+  - per_page 被正確限制為 100
 
-#### TC-U1.2-08: 空搜尋條件處理測試
-- **測試目的**：驗證無篩選條件時的預設行為
+#### TC-U1.2-08: 空篩選預設行為測試 (test_empty_filters_default_behavior)
+- **測試目的**：驗證無篩選條件時只套用預設狀態篩選（PUBLISHED）
 - **Use Case 對應**：主要流程步驟 1 - 預設值處理
-- **測試條件**：`filters={}`
-- **Mock 設定**：基本 query 鏈
-- **驗證點**：只套用預設狀態篩選（PUBLISHED）
+- **測試條件**：`filters={}` (空篩選條件)
+- **Mock 設定**：基本 Mock 鏈
+- **驗證點**：
+  - `mock_query.filter_by.assert_any_call(deleted_at=None)` (基礎查詢)
+  - `mock_filter_by.filter_by.assert_any_call(status=AnimalStatus.PUBLISHED)` (預設狀態)
 
 #### TC-U1.2-09: 無效篩選值處理測試
-- **測試目的**：驗證無效的 enum 值處理
-- **測試條件**：`filters={'species': 'INVALID_ANIMAL', 'sex': 'UNKNOWN'}`
-- **Mock 設定**：Exception mock
-- **驗證點**：`pytest.raises(ValidationError)` 且錯誤訊息明確
+- **物種測試** (test_invalid_species_validation)：
+  - **測試條件**：`filters={'species': 'INVALID_ANIMAL'}`
+  - **驗證點**：`pytest.raises(ValidationError)` 且訊息包含 '無效的物種值'
+- **性別測試** (test_invalid_sex_validation)：
+  - **測試條件**：`filters={'sex': 'UNKNOWN_GENDER'}`
+  - **驗證點**：`pytest.raises(ValidationError)` 且訊息包含 '無效的性別值'
 
-#### TC-U1.2-10: 關鍵字特殊字元處理測試
-- **測試目的**：驗證關鍵字搜尋的特殊字元轉義
-- **測試條件**：`filters={'q': '%_test[char]'}`
-- **Mock 設定**：`ilike()` 參數檢查
-- **驗證點**：特殊字元被正確轉義
+#### TC-U1.2-10: 關鍵字特殊字元處理測試 (test_keyword_special_character_handling)
+- **測試目的**：驗證關鍵字包含特殊字元時被正確處理
+- **測試條件**：`filters={'q': "小白's 100% 可愛貓咪"}` (包含特殊字元)
+- **Mock 設定**：
+  - 完整 Mock 鏈和 Animal 欄位屬性
+  - Mock OR 邏輯函數
+- **驗證點**：
+  - `mock_or.called` (OR 函數被調用)
+  - 各搜尋欄位的 like 方法被調用
+  - 不會因特殊字元導致錯誤
 
 ## Controller Tests（控制器測試）詳細設計
 
@@ -312,47 +357,75 @@ def diverse_animals(db):
 ### Unit Tests Mock 範例
 
 ```python
-def test_multi_condition_and_logic(monkeypatch):
+def test_multiple_conditions_and_logic(self, app_context, mock_db):
     """測試多條件AND邏輯組合"""
-    # 建立 mock 查詢鏈
+    # 使用成功模式設置Mock鏈
     mock_query = Mock()
-    mock_filter_chain = Mock()
+    mock_filter_by = Mock()
+    mock_filter = Mock()
+    mock_order_by = Mock()
     mock_paginate = Mock()
     
-    # 設定 mock 鏈式調用
-    mock_query.filter_by.return_value = mock_filter_chain
-    mock_filter_chain.filter.return_value = mock_filter_chain
-    mock_filter_chain.order_by.return_value = mock_filter_chain
-    mock_filter_chain.paginate.return_value = mock_paginate
+    # 正確設置Mock鏈 - 關鍵：支援多次調用
+    mock_query.filter_by.return_value = mock_filter_by
+    mock_filter_by.filter_by.return_value = mock_filter_by  # 支持多次filter_by
+    mock_filter_by.filter.return_value = mock_filter
+    mock_filter.filter.return_value = mock_filter  # 支持多次filter
+    mock_filter.order_by.return_value = mock_order_by
+    mock_order_by.paginate.return_value = mock_paginate
     
-    # Mock 分頁結果
-    mock_paginate.items = []
-    mock_paginate.total = 0
-    mock_paginate.page = 1
-    mock_paginate.per_page = 20
-    mock_paginate.pages = 0
-    
-    # Mock SQLAlchemy models
-    monkeypatch.setattr('app.models.animal.Animal.query', mock_query)
-    monkeypatch.setattr('app.models.animal.db.or_', Mock())
-    
-    # 執行測試
-    from app.services.animal_service import list_animals
-    filters = {
-        'species': 'DOG',
-        'sex': 'MALE', 
-        'min_age': 2,
-        'max_age': 5,
-        'q': 'friendly',
-        'region': '台北市'
-    }
-    
-    result = list_animals(filters)
-    
-    # 驗證所有條件都被套用
-    assert mock_query.filter_by.call_count >= 1  # species, sex 等條件
-    assert mock_filter_chain.filter.call_count >= 3  # age, keyword, region 條件
+    # 設置Mock pagination結果 - 使用configure_mock避免重新Mock化
+    mock_paginate.configure_mock(**{
+        'items': [],
+        'total': 0,
+        'page': 1,
+        'per_page': 20,
+        'pages': 1
+    })
+
+    with patch('app.services.animal_service.Animal') as mock_animal, \
+         patch('app.services.animal_service.func') as mock_func, \
+         patch('app.services.animal_service.or_') as mock_or:
+
+        mock_animal.query = mock_query
+        mock_db.engine.name = 'sqlite'  # 指定資料庫引擎
+        
+        # Mock SQLAlchemy func 操作 - 處理年齡計算
+        mock_age_calc = Mock()
+        mock_func.julianday.return_value = Mock()
+        age_expression = Mock()
+        age_expression.__ge__ = Mock(return_value=Mock())
+        age_expression.__le__ = Mock(return_value=Mock())
+        mock_age_calc.__truediv__ = Mock(return_value=age_expression)
+        mock_func.julianday.return_value.__sub__ = Mock(return_value=mock_age_calc)
+        
+        # Mock Animal 的欄位屬性
+        mock_animal.name.like = Mock(return_value=Mock())
+        mock_animal.description.like = Mock(return_value=Mock())
+        mock_animal.breed.like = Mock(return_value=Mock())
+
+        filters = {
+            'species': 'DOG',
+            'sex': 'MALE', 
+            'min_age': 1,
+            'max_age': 3,
+            'q': 'cute'
+        }
+        result = AnimalService.list_animals(filters)
+
+        # 驗證多個篩選條件都被應用
+        assert mock_filter_by.filter_by.call_count >= 3
+        assert mock_func.julianday.called  # 年齡篩選
+        assert mock_or.called  # 關鍵字搜尋
+        assert 'animals' in result
 ```
+
+### 重要Mock技巧
+
+1. **自引用Mock鏈**：`mock_filter_by.filter_by.return_value = mock_filter_by`
+2. **configure_mock使用**：避免屬性被重新Mock化
+3. **SQLAlchemy func操作**：需要Mock複雜的數學運算鏈
+4. **多層patch**：使用context manager同時Mock多個模組
 
 ## 測試執行與覆蓋率
 

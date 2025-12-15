@@ -2,9 +2,9 @@
 
 檔案位置：`specs/test_plan/unit_integration_test/useCase1_4_test_design.md`
 
-目的：為「領養申請提交（Use Case 1.4）」撰寫完整的三層測試架構設計，包含 Unit Tests、Controller Tests、Integration Tests，幫助後端開發/測試人員實作 jest/e2e 測試。
+目的：為「領養申請提交（Use Case 1.4）」撰寫完整的三層測試架構設計，包含 Unit Tests、Controller Tests、Integration Tests，幫助後端開發/測試人員實作 pytest 測試。
 
-前提：後端採用 NestJS + Prisma；專案已有測試配置與 ApplicationsService 可用於測試環境。
+前提：後端採用 Python Flask + SQLAlchemy；專案已有測試配置與 ApplicationService 可用於測試環境。
 
 ## 業務需求回顧
 
@@ -30,9 +30,9 @@
 ## 測試架構分層
 
 ### Unit Tests（Service 單元測試）
-- **測試範圍**：僅測試 `applications.service.ts` 中的申請提交業務邏輯
-- **測試方法**：使用 Jest mock Prisma client，不依賴真實資料庫
-- **檔案位置**：`backend/src/applications/applications.service.spec.ts`
+- **測試範圍**：僅測試 `application_service.py` 中的申請提交業務邏輯
+- **測試方法**：使用 pytest + unittest.mock mock SQLAlchemy ORM，不依賴真實資料庫
+- **檔案位置**：`backend/tests/unit/test_application_service_useCase1_4.py`
 - **測試重點**：
   - 申請資料驗證與儲存邏輯
   - 重複申請檢查邏輯
@@ -41,20 +41,20 @@
   - 申請資料完整性檢查
 
 ### Controller Tests（Route 控制器測試）
-- **測試範圍**：僅測試 `POST /applications` route 的 HTTP 層處理
-- **測試方法**：使用 Jest mock `ApplicationsService.create`，不依賴真實資料庫或 service 層
-- **檔案位置**：`backend/src/applications/applications.controller.spec.ts`
+- **測試範圍**：僅測試 `POST /api/applications` route 的 Flask 路由層處理
+- **測試方法**：使用 Flask test client mock `ApplicationService.create_application`，不依賴真實資料庫或 service 層
+- **檔案位置**：`backend/tests/controller/test_application_controller_useCase1_4.py`
 - **測試重點**：
   - HTTP 狀態碼與回傳結構
-  - 請求Body驗證（DTO validation）
+  - 請求JSON驗證（request validation）
   - JWT token處理（必要驗證）
   - 錯誤處理（重複申請、無效動物等）
   - Idempotency-Key支援
 
 ### Integration Tests（整合測試）
-- **測試範圍**：測試完整的申請提交流程（route → service → Prisma → database）
-- **測試方法**：建立真實測試資料，驗證端到端申請流程
-- **檔案位置**：`backend/test/applications-submit.e2e-spec.ts`
+- **測試範圍**：測試完整的申請提交流程（route → service → SQLAlchemy → database）
+- **測試方法**：建立真實測試資料庫，驗證端到端申請流程
+- **檔案位置**：`backend/tests/integration/test_application_submit_integration.py`
 - **測試重點**：
   - 完整申請流程驗證
   - 資料庫事務處理
@@ -65,38 +65,39 @@
 ## Unit Tests（Service 單元測試）詳細設計
 
 ### 測試目標
-- **測試對象**：`ApplicationsService.create(userId: string, createApplicationDto: CreateApplicationDto)`
-- **Mock 策略**：Mock Prisma client 及其查詢/事務方法
+- **測試對象**：`ApplicationService.create_application(applicant: User, data: Dict, idempotency_key: Optional[str])`
+- **Mock 策略**：Mock SQLAlchemy ORM 查詢方法和 db.session，使用 monkeypatch 和 unittest.mock
 - **業務邏輯重點**：申請驗證、重複檢查、資料儲存
 
 ### 核心測試案例
 
 #### TC-U1.4-01: 正常申請提交測試
-- **測試目的**：驗證正常情況下的申請建立
+- **測試目的**：驗證正常情況下的申請建立（無冪等性鍵）
 - **Use Case 對應**：主要流程步驟 3&4 - 提交申請並儲存
 - **測試條件**：合法用戶、可申請動物、完整申請資料
 - **Mock 設定**：
-  - `prisma.animalListing.findUnique()` 回傳AVAILABLE狀態動物
-  - `prisma.adoptionApplication.findFirst()` 回傳null（無重複申請）
-  - `prisma.adoptionApplication.create()` 成功建立
+  - `Animal.query.filter_by().first()` 回傳PUBLISHED狀態動物
+  - `Application.query.filter_by().filter().first()` 回傳None（無重複申請）
+  - `db.session.add()` 和 `db.session.commit()` 成功執行
+  - `notification_service.notify_application_submitted()` mock調用
 - **驗證點**：
   - 申請資料正確儲存
   - 返回完整申請物件
   - 包含申請者和動物關聯資訊
 
-#### TC-U1.4-02: 動物狀態驗證測試
-- **測試目的**：驗證只能對「已發布」狀態的動物提交申請
-- **Use Case 對應**：先決條件 - 動物狀態必須是「已發布」
-- **測試條件**：動物狀態為PENDING或ADOPTED
-- **Mock 設定**：`findUnique()` 回傳非AVAILABLE狀態動物
-- **驗證點**：拋出 `BadRequestException`，錯誤訊息指出動物不可申請
+#### TC-U1.4-02: 非一般會員權限檢查測試
+- **測試目的**：驗證只有一般會員可以提交領養申請
+- **Use Case 對應**：行為者限制 - 一般會員
+- **測試條件**：收容所員工嘗試提交申請
+- **Mock 設定**：不需要Mock，直接傳入SHELTER_MEMBER角色用戶
+- **驗證點**：拋出 `PermissionDeniedError`，錯誤訊息指出只有一般會員可申請
 
 #### TC-U1.4-03: 重複申請檢查測試
 - **測試目的**：驗證防止同一用戶重複申請同一動物
 - **Use Case 對應**：輔助說明 2 - 重複申請檢查
 - **測試條件**：用戶已對該動物提交過申請
-- **Mock 設定**：`findFirst()` 回傳既有申請記錄
-- **驗證點**：拋出 `ConflictException`，錯誤訊息明確指出重複申請
+- **Mock 設定**：`Application.query.filter_by().filter().first()` 回傳既有申請記錄
+- **驗證點**：拋出 `ConflictError`，錯誤訊息明確指出重複申請
 
 #### TC-U1.4-04: 申請自己動物檢查測試
 - **測試目的**：驗證用戶不能申請自己的動物
@@ -291,160 +292,181 @@
 
 ### 申請測試資料工廠
 
-```typescript
-export const createTestApplicationData = async (prisma: PrismaService, options = {}) => {
-  const defaultOptions = {
-    createUser: true,
-    createAnimal: true,
-    animalStatus: 'AVAILABLE',
-    userRole: 'ADOPTER',
-    ...options
-  };
+```python
+from unittest.mock import Mock
+from uuid import uuid4
+from app.models.user import User, UserRole
+from app.models.animal import Animal, AnimalStatus, Species
+from app.models.application import Application, ApplicationStatus
 
-  // 建立申請者
-  const applicant = defaultOptions.createUser ? await prisma.user.create({
-    data: {
-      name: '申請者小華',
-      email: 'applicant@test.com',
-      role: defaultOptions.userRole,
-      profileCompleted: true
+def create_test_application_data(options=None):
+    """創建測試申請資料工廠"""
+    default_options = {
+        'create_user': True,
+        'create_animal': True,
+        'animal_status': AnimalStatus.PUBLISHED,
+        'user_role': UserRole.GENERAL_MEMBER,
     }
-  }) : null;
-
-  // 建立動物擁有者
-  const owner = await prisma.user.create({
-    data: {
-      name: '擁有者小明',
-      email: 'owner@test.com',
-      role: 'OWNER'
+    if options:
+        default_options.update(options)
+    
+    # 建立申請者Mock
+    applicant = None
+    if default_options['create_user']:
+        applicant = Mock(spec=User)
+        applicant.user_id = str(uuid4())
+        applicant.role = default_options['user_role']
+        applicant.username = 'test_user'
+        applicant.email = 'applicant@test.com'
+        applicant.primary_shelter_id = None
+    
+    # 建立動物擁有者Mock
+    owner = Mock(spec=User)
+    owner.user_id = str(uuid4())
+    owner.role = UserRole.GENERAL_MEMBER
+    owner.username = 'animal_owner'
+    owner.email = 'owner@test.com'
+    
+    # 建立動物Mock
+    animal = None
+    if default_options['create_animal']:
+        animal = Mock(spec=Animal)
+        animal.animal_id = str(uuid4())
+        animal.name = '小白'
+        animal.species = Species.DOG
+        animal.status = default_options['animal_status']
+        animal.owner_id = owner.user_id
+        animal.created_by = owner.user_id
+        animal.deleted_at = None
+    
+    # 申請資料範本
+    application_data = {
+        'animal_id': animal.animal_id if animal else str(uuid4()),
+        'type': 'ADOPTION',
+        'contact_phone': '0912345678',
+        'contact_address': '台北市大安區復興南路100號',
+        'occupation': '軟體工程師',
+        'housing_type': '公寓',
+        'has_experience': True,
+        'reason': '希望給狗狗一個溫暖的家',
+        'notes': '平日在家工作，有充足時間照顧動物',
+        'attachments': ['photo1.jpg', 'cert.pdf']
     }
-  });
-
-  // 建立動物
-  const animal = defaultOptions.createAnimal ? await prisma.animalListing.create({
-    data: {
-      species: 'dog',
-      breed: '黃金獵犬',
-      ageEstimate: 3,
-      gender: 'male',
-      description: '溫馴友善的狗狗',
-      location: '台北市信義區',
-      healthStatus: '健康良好',
-      status: defaultOptions.animalStatus,
-      ownerId: owner.id,
+    
+    return {
+        'applicant': applicant,
+        'owner': owner,
+        'animal': animal,
+        'application_data': application_data
     }
-  }) : null;
-
-  // 申請資料範本
-  const applicationData = {
-    listingId: animal?.id,
-    answers: JSON.stringify({
-      contactPhone: '0912345678',
-      contactAddress: '台北市大安區復興南路100號',
-      housingType: '公寓',
-      hasYard: false,
-      hasOtherPets: false,
-      experienceYears: 5,
-      dailyCareTime: '4-6小時',
-      reason: '希望給狗狗一個溫暖的家',
-      emergencyContact: '小華媽媽 0987654321'
-    })
-  };
-
-  return {
-    applicant,
-    owner,
-    animal,
-    applicationData
-  };
-};
 ```
 
 ## Mock 策略詳細指南
 
 ### Unit Tests Mock 範例
 
-```typescript
-describe('ApplicationsService - create', () => {
-  let service: ApplicationsService;
-  let prisma: DeepMockProxy<PrismaService>;
+```python
+import pytest
+from unittest.mock import Mock, patch
+from app.services.application_service import ApplicationService
+from app.models.application import Application, ApplicationStatus
+from app.models.animal import Animal, AnimalStatus
+from app.exceptions import ConflictError
 
-  beforeEach(async () => {
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        ApplicationsService,
-        {
-          provide: PrismaService,
-          useValue: mockDeep<PrismaService>(),
-        },
-      ],
-    }).compile();
-
-    service = module.get(ApplicationsService);
-    prisma = module.get(PrismaService);
-  });
-
-  it('should create application successfully', async () => {
-    // Mock 動物資料
-    const mockAnimal = {
-      id: 'animal-uuid',
-      status: 'AVAILABLE',
-      ownerId: 'owner-uuid',
-      owner: { id: 'owner-uuid', name: '擁有者' }
-    };
-
-    // Mock 無重複申請
-    prisma.adoptionApplication.findFirst.mockResolvedValue(null);
+class TestApplicationServiceCreateApplication:
+    """測試 ApplicationService.create_application() 的業務邏輯"""
     
-    // Mock 動物查詢
-    prisma.animalListing.findUnique.mockResolvedValue(mockAnimal);
-
-    // Mock 申請建立
-    const mockApplication = {
-      id: 'app-uuid',
-      listingId: 'animal-uuid',
-      applicantId: 'user-uuid',
-      answers: '{"reason":"want to adopt"}',
-      status: 'SUBMITTED',
-      submittedAt: new Date(),
-    };
-    prisma.adoptionApplication.create.mockResolvedValue(mockApplication);
-
-    const result = await service.create('user-uuid', {
-      listingId: 'animal-uuid',
-      answers: '{"reason":"want to adopt"}'
-    });
-
-    expect(result).toBeDefined();
-    expect(result.status).toBe('SUBMITTED');
-    expect(prisma.adoptionApplication.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        listingId: 'animal-uuid',
-        applicantId: 'user-uuid'
-      }),
-      include: expect.any(Object)
-    });
-  });
-
-  it('should prevent duplicate application', async () => {
-    // Mock 既有申請
-    const existingApplication = {
-      id: 'existing-uuid',
-      applicantId: 'user-uuid',
-      listingId: 'animal-uuid'
-    };
-    prisma.adoptionApplication.findFirst.mockResolvedValue(existingApplication);
-
-    // Mock 動物資料
-    const mockAnimal = { id: 'animal-uuid', status: 'AVAILABLE', ownerId: 'owner-uuid' };
-    prisma.animalListing.findUnique.mockResolvedValue(mockAnimal);
-
-    await expect(service.create('user-uuid', {
-      listingId: 'animal-uuid',
-      answers: '{"reason":"want to adopt"}'
-    })).rejects.toThrow(ConflictException);
-  });
-});
+    def test_successful_application_creation(
+        self, app_context, monkeypatch, mock_general_user,
+        mock_available_animal, mock_valid_application_data
+    ):
+        """正常申請提交測試"""
+        # Mock Application.query 的複雜鏈式調用
+        mock_app_query = Mock()
+        
+        def mock_filter_by(*args, **kwargs):
+            mock_chain = Mock()
+            mock_chain.filter.return_value.first.return_value = None  # 無重複申請
+            mock_chain.first.return_value = None  # 冪等性檢查
+            return mock_chain
+        
+        mock_app_query.filter_by = mock_filter_by
+        
+        # Mock Application 構造函數
+        mock_application_instance = Mock(spec=Application)
+        mock_application_instance.animal_id = mock_valid_application_data['animal_id']
+        mock_application_instance.applicant_id = mock_general_user.user_id
+        mock_application_instance.status = ApplicationStatus.PENDING
+        
+        # Mock Animal.query 和 Application.query
+        with patch('app.services.application_service.Animal') as mock_animal_class, \
+             patch('app.services.application_service.Application') as mock_application_class:
+             
+            # 設置 Animal 查詢回傳可申請動物
+            mock_animal_class.query.filter_by.return_value.first.return_value = mock_available_animal
+            
+            # 設置 Application 查詢回傳無重複
+            mock_application_class.query.filter_by = mock_filter_by
+            mock_application_class.return_value = mock_application_instance
+            
+            # Mock db.session
+            mock_session = Mock()
+            mock_session.add = Mock()
+            mock_session.commit = Mock()
+            mock_session.execute.return_value.scalar.return_value = 5  # MAX ID
+            monkeypatch.setattr('app.services.application_service.db.session', mock_session)
+            
+            # Mock notification service
+            mock_notification_service = Mock()
+            monkeypatch.setattr(
+                'app.services.application_service.notification_service',
+                mock_notification_service
+            )
+            
+            # 執行測試
+            result = ApplicationService.create_application(
+                applicant=mock_general_user,
+                data=mock_valid_application_data
+            )
+            
+            # 驗證結果
+            assert result == mock_application_instance
+            assert result.animal_id == mock_valid_application_data['animal_id']
+            assert result.applicant_id == mock_general_user.user_id
+            
+            # 驗證資料庫操作
+            mock_session.add.assert_called_once_with(mock_application_instance)
+            mock_session.commit.assert_called_once()
+    
+    def test_prevent_duplicate_application(
+        self, app_context, monkeypatch, mock_general_user,
+        mock_available_animal, mock_valid_application_data
+    ):
+        """重複申請檢查測試"""
+        # Mock 既有申請
+        existing_application = Mock(spec=Application)
+        existing_application.application_id = 'existing-123'
+        existing_application.applicant_id = mock_general_user.user_id
+        
+        # Mock Application.query 返回重複申請
+        with patch('app.services.application_service.Application') as mock_application_class:
+            mock_filter_chain = Mock()
+            mock_filter_chain.filter.return_value.first.return_value = existing_application
+            mock_application_class.query.filter_by.return_value = mock_filter_chain
+            
+            # Mock Animal.query
+            with patch('app.services.application_service.Animal') as mock_animal_class:
+                mock_animal_class.query.filter_by.return_value.first.return_value = mock_available_animal
+                
+                # 測試應該拋出衝突錯誤
+                with pytest.raises(ConflictError) as exc_info:
+                    ApplicationService.create_application(
+                        applicant=mock_general_user,
+                        data=mock_valid_application_data
+                    )
+                
+                assert '您已對此動物提交申請' in str(exc_info.value)
+```
 ```
 
 ## 測試執行與覆蓋率
@@ -453,22 +475,25 @@ describe('ApplicationsService - create', () => {
 
 ```bash
 # 執行所有 Use Case 1.4 相關測試
-npm test -- --testNamePattern="useCase1_4|application.*submit"
+python -m pytest tests/ -k "useCase1_4" -v
 
 # 只執行 Unit Tests (Service 層)
-npm test -- src/applications/applications.service.spec.ts
+python -m pytest tests/unit/test_application_service_useCase1_4.py -v
 
-# 只執行 Controller Tests  
-npm test -- src/applications/applications.controller.spec.ts
+# 只執行 Controller Tests
+python -m pytest tests/controller/test_application_controller_useCase1_4.py -v
 
 # 只執行 Integration Tests
-npm test -- test/applications-submit.e2e-spec.ts
+python -m pytest tests/integration/test_application_submit_integration.py -v
 
 # 執行並顯示覆蓋率
-npm test -- --coverage --testNamePattern="useCase1_4"
+python -m pytest tests/ -k "useCase1_4" --cov=app --cov-report=html
 
-# 執行特定優先級測試
-npm test -- --testNamePattern="TC-[UIC]1\.4-0[1-4]"  # P0測試
+# 執行特定優先級測試（P0測試）
+python -m pytest tests/ -k "test_successful_application_creation or test_prevent_duplicate" -v
+
+# 執行所有測試並顯示詳細輸出
+python -m pytest tests/ -v --tb=short
 ```
 
 ### 覆蓋率目標
