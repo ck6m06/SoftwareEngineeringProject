@@ -1,18 +1,18 @@
-@startuml 使用案例2_申請審核作業
-title 使用案例3.2: 申請審核作業\n(BP-APPLICATION-005)
+@startuml 使用案例3.2_申請審核作業
+title 使用案例3.2: 申請審核作業
 
 actor "送養者\n(一般會員/收容所會員)" as Owner
 participant "ApplicationReview.vue" as ReviewPage
-participant "applications.ts API" as AppAPI
-participant "applications.py" as AppBlueprint
+participant "applications.ts" as AppAPI
+participant "applications.py(blueprint)" as AppBlueprint
 participant "application_service.py" as AppService
 participant "permission_service.py" as PermissionService
 participant "notification_service.py" as NotificationService
 participant "audit_service.py" as AuditService
 participant "animal_service.py" as AnimalService
-participant "Application Model" as AppModel
-participant "Animal Model" as AnimalModel
-database "PostgreSQL" as DB
+participant "application.py(model)" as AppModel
+participant "animal.py(model)" as AnimalModel
+database "MySQL" as DB
 
 == 1. 進入申請審核頁面 ==
 Owner -> ReviewPage: 瀏覽到「領養申請管理」

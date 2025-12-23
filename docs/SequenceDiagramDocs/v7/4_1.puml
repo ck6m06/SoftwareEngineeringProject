@@ -1,0 +1,23 @@
+@startuml
+title Use Case 4.1: Medical Record Create
+actor User
+participant MedicalRecords.vue
+participant medicalRecords.ts
+participant medical_records.py
+participant medical_record_service.py
+database MySQL
+
+User -> MedicalRecords.vue: Select animal
+MedicalRecords.vue -> MedicalRecords.vue: Show create form
+User -> MedicalRecords.vue: Fill record data
+User -> MedicalRecords.vue: Click Save
+MedicalRecords.vue -> medicalRecords.ts: createMedicalRecord()
+medicalRecords.ts -> medical_records.py: POST /animals/{id}/medical-records
+medical_records.py -> medical_record_service.py: create_medical_record()
+medical_record_service.py -> MySQL: INSERT INTO medical_records
+MySQL --> medical_record_service.py: record_id
+medical_record_service.py --> medical_records.py: record
+medical_records.py --> medicalRecords.ts: 201 Created
+medicalRecords.ts --> MedicalRecords.vue: success
+MedicalRecords.vue --> User: Success message
+@enduml

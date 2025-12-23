@@ -1,0 +1,44 @@
+@startuml
+title Use Case 5.1: User Management (Admin)
+actor Admin
+participant AdminUsers.vue
+participant users.ts
+participant admin.py
+participant user_service.py
+database MySQL
+
+Admin -> AdminUsers.vue: Visit /admin/users
+AdminUsers.vue -> users.ts: listUsers()
+users.ts -> admin.py: GET /admin/users
+admin.py -> admin.py: Verify admin role
+admin.py -> user_service.py: list_users()
+user_service.py -> MySQL: SELECT users
+MySQL --> user_service.py: users[]
+user_service.py --> admin.py: users
+admin.py --> users.ts: 200 OK
+users.ts --> AdminUsers.vue: users
+AdminUsers.vue --> Admin: Display user list
+
+alt Update User Status
+  Admin -> AdminUsers.vue: Enable/Disable user
+  AdminUsers.vue -> users.ts: updateUserStatus(user_id, status)
+  users.ts -> admin.py: PATCH /admin/users/{id}
+  admin.py -> user_service.py: update_user_status()
+  user_service.py -> MySQL: UPDATE users SET is_active
+  MySQL --> user_service.py: success
+  user_service.py --> admin.py: user
+  admin.py --> users.ts: 200 OK
+  users.ts --> AdminUsers.vue: success
+  AdminUsers.vue --> Admin: Status updated
+else Reset Password
+  Admin -> AdminUsers.vue: Reset user password
+  AdminUsers.vue -> users.ts: resetUserPassword(user_id)
+  users.ts -> admin.py: POST /admin/users/{id}/reset-password
+  admin.py -> user_service.py: reset_password()
+  user_service.py -> MySQL: UPDATE users SET password_hash
+  user_service.py --> admin.py: success
+  admin.py --> users.ts: 200 OK
+  users.ts --> AdminUsers.vue: success
+  AdminUsers.vue --> Admin: Password reset
+end
+@enduml

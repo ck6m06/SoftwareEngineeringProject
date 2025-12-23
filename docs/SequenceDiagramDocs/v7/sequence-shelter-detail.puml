@@ -1,0 +1,44 @@
+@startuml
+title Shelter Detail View
+actor User
+participant Shelters.vue
+participant ShelterDetail.vue
+participant shelters.ts
+participant shelters.py
+participant shelter_service.py
+database MySQL
+
+User -> Shelters.vue: Browse shelters
+Shelters.vue -> Shelters.vue: Display shelter list
+User -> Shelters.vue: Click shelter card
+Shelters.vue -> ShelterDetail.vue: Navigate to /shelters/{id}
+activate ShelterDetail.vue
+
+ShelterDetail.vue -> shelters.ts: getShelter(id)
+activate shelters.ts
+shelters.ts -> shelters.py: GET /shelters/{id}
+activate shelters.py
+shelters.py -> shelter_service.py: get_shelter(id)
+activate shelter_service.py
+shelter_service.py -> MySQL: SELECT shelter with animals count
+MySQL --> shelter_service.py: shelter data
+shelter_service.py --> shelters.py: shelter
+deactivate shelter_service.py
+shelters.py --> shelters.ts: 200 OK
+deactivate shelters.py
+shelters.ts --> ShelterDetail.vue: shelter
+deactivate shelters.ts
+
+ShelterDetail.vue -> ShelterDetail.vue: Load shelter animals
+ShelterDetail.vue -> shelters.ts: getShelterAnimals(shelter_id)
+shelters.ts -> shelters.py: GET /shelters/{id}/animals
+shelters.py -> shelter_service.py: get_shelter_animals()
+shelter_service.py -> MySQL: SELECT animals WHERE shelter_id
+MySQL --> shelter_service.py: animals[]
+shelter_service.py --> shelters.py: animals
+shelters.py --> shelters.ts: 200 OK
+shelters.ts --> ShelterDetail.vue: animals
+
+ShelterDetail.vue --> User: Display shelter info and animals
+deactivate ShelterDetail.vue
+@enduml

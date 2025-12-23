@@ -1,0 +1,20 @@
+@startuml
+title Use Case 4.2: Medical Record View
+actor User
+participant AnimalDetail.vue
+participant medicalRecords.ts
+participant medical_records.py
+participant medical_record_service.py
+database MySQL
+
+User -> AnimalDetail.vue: View animal detail
+AnimalDetail.vue -> medicalRecords.ts: getMedicalRecords(animal_id)
+medicalRecords.ts -> medical_records.py: GET /animals/{id}/medical-records
+medical_records.py -> medical_record_service.py: list_medical_records()
+medical_record_service.py -> MySQL: SELECT medical_records WHERE animal_id
+MySQL --> medical_record_service.py: records[]
+medical_record_service.py --> medical_records.py: records
+medical_records.py --> medicalRecords.ts: 200 OK
+medicalRecords.ts --> AnimalDetail.vue: records
+AnimalDetail.vue --> User: Display medical history
+@enduml

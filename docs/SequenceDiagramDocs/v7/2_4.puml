@@ -1,0 +1,38 @@
+@startuml
+title Use Case 2.4: Shelter Animals Management
+actor ShelterMember
+participant ShelterAnimals.vue
+participant animals.ts
+participant animals.py
+participant animal_service.py
+database MySQL
+
+ShelterMember -> ShelterAnimals.vue: Visit /shelter/animals
+ShelterAnimals.vue -> ShelterAnimals.vue: Get shelter_id from authStore
+ShelterAnimals.vue -> animals.ts: listAnimals(shelter_id)
+animals.ts -> animals.py: GET /animals?shelter_id=X
+animals.py -> animal_service.py: list_animals()
+animal_service.py -> MySQL: SELECT animals WHERE shelter_id
+MySQL --> animal_service.py: animals[]
+animal_service.py --> animals.py: result
+animals.py --> animals.ts: 200 OK
+animals.ts --> ShelterAnimals.vue: animals
+ShelterAnimals.vue --> ShelterMember: Display shelter animals
+
+alt Update Animal
+  ShelterMember -> ShelterAnimals.vue: Edit animal
+  ShelterAnimals.vue -> animals.ts: updateAnimal(id, data)
+  animals.ts -> animals.py: PATCH /animals/{id}
+  animals.py -> animal_service.py: update_animal()
+  animal_service.py -> MySQL: UPDATE animals
+  MySQL --> animal_service.py: updated animal
+  animal_service.py --> animals.py: animal
+  animals.py --> animals.ts: 200 OK
+  animals.ts --> ShelterAnimals.vue: success
+  ShelterAnimals.vue --> ShelterMember: Success message
+else Export Data
+  ShelterMember -> ShelterAnimals.vue: Click Export
+  ShelterAnimals.vue -> ShelterAnimals.vue: Generate CSV from data
+  ShelterAnimals.vue --> ShelterMember: Download CSV file
+end
+@enduml

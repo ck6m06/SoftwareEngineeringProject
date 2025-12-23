@@ -1,0 +1,23 @@
+@startuml
+title Use Case 1.4: Application Submit
+actor User
+participant AnimalDetail.vue  
+participant applications.ts
+participant applications.py
+participant application_service.py
+participant notification_service.py
+database MySQL
+
+User -> AnimalDetail.vue: Click Apply
+AnimalDetail.vue -> applications.ts: createApplication()
+applications.ts -> applications.py: POST /applications
+applications.py -> application_service.py: create_application()
+application_service.py -> MySQL: INSERT application
+MySQL --> application_service.py: application_id
+application_service.py -> notification_service.py: notify_owner()
+notification_service.py -> MySQL: INSERT notification
+application_service.py --> applications.py: application
+applications.py --> applications.ts: 201 Created
+applications.ts -> AnimalDetail.vue: success
+AnimalDetail.vue --> User: Success message
+@enduml

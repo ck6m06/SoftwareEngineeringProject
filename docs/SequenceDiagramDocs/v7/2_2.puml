@@ -1,0 +1,20 @@
+@startuml  
+title Use Case 2.2: My Rehomes Management
+actor User
+participant MyRehomes.vue
+participant animals.ts
+participant animals.py
+participant animal_service.py
+database MySQL
+
+User -> MyRehomes.vue: Visit /my-rehomes
+MyRehomes.vue -> animals.ts: listAnimals(owner_id)
+animals.ts -> animals.py: GET /animals?owner_id=X
+animals.py -> animal_service.py: list_animals()
+animal_service.py -> MySQL: SELECT animals WHERE owner_id
+MySQL --> animal_service.py: animals[]
+animal_service.py --> animals.py: result
+animals.py --> animals.ts: 200 OK
+animals.ts --> MyRehomes.vue: animals
+MyRehomes.vue --> User: Display list
+@enduml

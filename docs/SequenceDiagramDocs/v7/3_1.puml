@@ -1,0 +1,33 @@
+@startuml
+title Use Case 3.1/3.3: Application Review
+actor Reviewer
+participant ApplicationReview.vue
+participant applications.ts
+participant applications.py
+participant application_service.py
+participant notification_service.py
+database MySQL
+
+Reviewer -> ApplicationReview.vue: Visit /application-review
+ApplicationReview.vue -> applications.ts: listApplications()
+applications.ts -> applications.py: GET /applications
+applications.py -> application_service.py: list_applications()
+application_service.py -> MySQL: SELECT applications
+MySQL --> application_service.py: applications[]
+application_service.py --> applications.py: result
+applications.py --> applications.ts: 200 OK
+applications.ts --> ApplicationReview.vue: applications
+ApplicationReview.vue --> Reviewer: Display applications
+
+Reviewer -> ApplicationReview.vue: Approve/Reject
+ApplicationReview.vue -> applications.ts: updateApplication()
+applications.ts -> applications.py: PATCH /applications/{id}
+applications.py -> application_service.py: update_status()
+application_service.py -> MySQL: UPDATE applications
+application_service.py -> notification_service.py: notify_applicant()
+notification_service.py -> MySQL: INSERT notification
+application_service.py --> applications.py: success
+applications.py --> applications.ts: 200 OK
+applications.ts --> ApplicationReview.vue: success
+ApplicationReview.vue --> Reviewer: Success message
+@enduml

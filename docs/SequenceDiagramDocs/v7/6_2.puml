@@ -1,0 +1,55 @@
+@startuml
+title Use Case 6.2: Notification Management
+actor User
+participant NotificationCenter.vue
+participant client.ts
+participant notifications.py
+participant notification_service.py
+database MySQL
+
+User -> NotificationCenter.vue: Visit /notifications
+NotificationCenter.vue -> client.ts: getNotifications()
+client.ts -> notifications.py: GET /notifications
+notifications.py -> notification_service.py: get_user_notifications()
+notification_service.py -> MySQL: SELECT notifications
+MySQL --> notification_service.py: notifications[]
+notification_service.py --> notifications.py: result
+notifications.py --> client.ts: 200 OK
+client.ts --> NotificationCenter.vue: notifications
+NotificationCenter.vue --> User: Display notifications
+
+alt Mark as Read
+  User -> NotificationCenter.vue: Click Mark as Read
+  NotificationCenter.vue -> client.ts: markAsRead(notification_id)
+  client.ts -> notifications.py: PATCH /notifications/{id}
+  notifications.py -> notification_service.py: mark_as_read()
+  notification_service.py -> MySQL: UPDATE notifications SET is_read=true
+  MySQL --> notification_service.py: success
+  notification_service.py --> notifications.py: notification
+  notifications.py --> client.ts: 200 OK
+  client.ts --> NotificationCenter.vue: success
+  NotificationCenter.vue --> User: Marked as read
+else Delete Notification
+  User -> NotificationCenter.vue: Click Delete
+  NotificationCenter.vue -> client.ts: deleteNotification(id)
+  client.ts -> notifications.py: DELETE /notifications/{id}
+  notifications.py -> notification_service.py: delete_notification()
+  notification_service.py -> MySQL: DELETE FROM notifications WHERE id
+  MySQL --> notification_service.py: success
+  notification_service.py --> notifications.py: success
+  notifications.py --> client.ts: 204 No Content
+  client.ts --> NotificationCenter.vue: success
+  NotificationCenter.vue --> User: Deleted successfully
+else Mark All as Read
+  User -> NotificationCenter.vue: Click Mark All as Read
+  NotificationCenter.vue -> client.ts: markAllAsRead()
+  client.ts -> notifications.py: POST /notifications/mark-all-read
+  notifications.py -> notification_service.py: mark_all_as_read()
+  notification_service.py -> MySQL: UPDATE notifications SET is_read=true WHERE user_id
+  MySQL --> notification_service.py: count
+  notification_service.py --> notifications.py: result
+  notifications.py --> client.ts: 200 OK
+  client.ts --> NotificationCenter.vue: success
+  NotificationCenter.vue --> User: All marked as read
+end
+@enduml

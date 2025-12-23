@@ -1,0 +1,30 @@
+@startuml
+title Use Case 2.3.1: Shelter Batch Upload
+actor ShelterMember
+participant ShelterBatch.vue
+participant animals.ts
+participant animals.py
+participant animal_service.py
+participant jobs.py
+participant job_service.py
+database MySQL
+
+ShelterMember -> ShelterBatch.vue: Upload Excel file
+ShelterBatch.vue -> ShelterBatch.vue: Validate file format
+ShelterBatch.vue -> animals.ts: uploadBatchAnimals(file)
+animals.ts -> animals.py: POST /animals/batch
+animals.py -> job_service.py: create_batch_job()
+job_service.py -> MySQL: INSERT INTO jobs
+MySQL --> job_service.py: job_id
+job_service.py --> animals.py: job
+animals.py --> animals.ts: 202 Accepted
+animals.ts --> ShelterBatch.vue: job_id
+ShelterBatch.vue --> ShelterMember: Processing started
+
+== Background Processing ==
+job_service.py -> animal_service.py: process_batch()
+loop Each row
+  animal_service.py -> MySQL: INSERT animal
+end
+animal_service.py -> MySQL: UPDATE job SET status=COMPLETED
+@enduml

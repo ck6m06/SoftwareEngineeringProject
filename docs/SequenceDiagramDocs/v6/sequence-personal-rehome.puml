@@ -1,18 +1,18 @@
 @startuml 使用案例1_個人送養發佈
-title 使用案例1: 個人送養發佈流程\n(BP-REHOME-002)
+title 使用案例1: 個人送養發佈流程
 
 actor "一般會員" as User
 participant "RehomeForm.vue" as Form
 participant "FileUploader.vue" as Uploader
-participant "animals.ts API" as AnimalAPI
-participant "medicalRecords.ts API" as MedicalAPI
-participant "uploads API" as UploadAPI
-participant "animals.py" as AnimalBlueprint
+participant "animals.ts" as AnimalAPI
+participant "medicalRecords.ts" as MedicalAPI
+participant "uploads.py(blueprint)" as UploadAPI
+participant "animals.py(blueprint)" as AnimalBlueprint
 participant "animal_service.py" as AnimalService
-participant "Animal Model" as AnimalModel
+participant "animal.py(model)" as AnimalModel
 participant "notification_service.py" as NotificationService
-database "PostgreSQL" as DB
-participant "MinIO/S3" as Storage
+database "MySQL" as DB
+participant "MinIO" as Storage
 
 == 1. 進入表單頁面 ==
 User -> Form: 點選「發佈送養」

@@ -1,0 +1,31 @@
+@startuml
+title Use Case: My Applications View
+actor User
+participant MyApplications.vue
+participant applications.ts
+participant applications.py
+participant application_service.py
+database MySQL
+
+User -> MyApplications.vue: Visit /my-applications
+MyApplications.vue -> applications.ts: listApplications(mode=applicant)
+applications.ts -> applications.py: GET /applications?mode=applicant
+applications.py -> application_service.py: list_applications()
+application_service.py -> MySQL: SELECT applications WHERE applicant_id
+MySQL --> application_service.py: applications[]
+application_service.py --> applications.py: result
+applications.py --> applications.ts: 200 OK
+applications.ts --> MyApplications.vue: applications
+MyApplications.vue --> User: Display my applications
+
+User -> MyApplications.vue: Withdraw application
+MyApplications.vue -> applications.ts: withdrawApplication(id)
+applications.ts -> applications.py: DELETE /applications/{id}
+applications.py -> application_service.py: withdraw_application()
+application_service.py -> MySQL: UPDATE applications SET status=WITHDRAWN
+MySQL --> application_service.py: success
+application_service.py --> applications.py: success
+applications.py --> applications.ts: 200 OK
+applications.ts --> MyApplications.vue: success
+MyApplications.vue --> User: Withdrawn successfully
+@enduml

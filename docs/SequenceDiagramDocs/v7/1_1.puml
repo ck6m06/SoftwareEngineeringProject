@@ -1,0 +1,86 @@
+﻿@startuml 使用案例1_1_動物列表瀏覽
+title 使用案例1.1: 動物列表瀏覽流程
+
+actor "使用者\n(訪客/會員)" as User
+participant "Animals.vue" as AnimalsPage
+participant "animals.ts" as AnimalAPI
+participant "animals.py(blueprint)" as AnimalBlueprint
+participant "animal_service.py" as AnimalService
+database "MySQL" as DB
+participant "MinIO" as Storage
+
+== 1. 進入動物瀏覽頁面 ==
+User -> AnimalsPage: 訪問「/animals」路由
+activate AnimalsPage
+AnimalsPage -> AnimalsPage: 初始化篩選條件\n(filters = 預設值)
+AnimalsPage -> AnimalsPage: 檢查用戶登入狀態\n(authStore.user)
+
+== 2. 載入動物列表 ==
+AnimalsPage -> AnimalAPI: listAnimals(filters)
+activate AnimalAPI
+AnimalAPI -> AnimalBlueprint: GET /animals\n?page=1&per_page=20
+activate AnimalBlueprint
+AnimalBlueprint -> AnimalBlueprint: 檢查 JWT Token (可選)
+AnimalBlueprint -> AnimalBlueprint: 收集篩選參數\n(species, sex, status, region等)
+AnimalBlueprint -> AnimalService: list_animals(filters, user_id)
+activate AnimalService
+
+AnimalService -> AnimalService: 建立查詢基礎\n(status = PUBLISHED)
+AnimalService -> AnimalService: 套用篩選條件\n(物種、性別、地區等)
+AnimalService -> AnimalService: 排序(最新上架優先)
+AnimalService -> DB: SELECT animals\nWHERE status='PUBLISHED'\nLIMIT per_page OFFSET offset
+activate DB
+DB --> AnimalService: animals[]
+deactivate DB
+
+AnimalService -> AnimalService: 載入關聯資料\n(images, shelter, owner)
+AnimalService -> DB: 批次載入圖片\nSELECT * FROM animal_images
+activate DB
+DB --> AnimalService: images[]
+deactivate DB
+
+AnimalService -> AnimalService: 組裝分頁資訊\n(total, pages, current_page)
+AnimalService --> AnimalBlueprint: {animals[], pagination}
+deactivate AnimalService
+AnimalBlueprint --> AnimalAPI: 200 OK\n{animals[], pagination}
+deactivate AnimalBlueprint
+AnimalAPI --> AnimalsPage: {animals[], pagination}
+deactivate AnimalAPI
+
+== 3. 顯示動物卡片 ==
+AnimalsPage -> AnimalsPage: 渲染動物卡片列表
+loop 每個動物
+    AnimalsPage -> AnimalsPage: 顯示圖片、名稱\n物種、年齡、性別
+    AnimalsPage -> Storage: 透過 CDN 載入圖片\n(image.url)
+    Storage --> AnimalsPage: 圖片資料
+end
+
+AnimalsPage --> User: 顯示動物列表\n(20筆/頁)
+deactivate AnimalsPage
+
+== 4. 使用者互動操作 ==
+alt 點選動物卡片
+    User -> AnimalsPage: 點選動物卡片
+    AnimalsPage -> User: 導航至動物詳情頁\n(router.push)
+else 點選分頁
+    User -> AnimalsPage: 點選下一頁
+    AnimalsPage -> AnimalsPage: 更新 page 參數
+    AnimalsPage -> AnimalAPI: 重新載入動物列表
+else 點選加入關注 (需登入)
+    User -> AnimalsPage: 點選「關注」按鈕
+    AnimalsPage -> AnimalsPage: 檢查登入狀態
+    note right
+      未實現關注功能
+      顯示「即將推出」提示
+    end note
+end
+
+note over User, DB
+  **後置條件:**
+  1. 動物列表已載入並顯示
+  2. 僅顯示 status = PUBLISHED 的動物
+  3. 支援分頁瀏覽
+  4. 圖片透過 CDN 快速載入
+end note
+
+@enduml

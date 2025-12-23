@@ -1,0 +1,32 @@
+@startuml
+title Use Case 6.1: Notification View
+actor User
+participant NotificationCenter.vue
+participant NotificationBell.vue
+participant client.ts
+participant notifications.py
+participant notification_service.py
+database MySQL
+
+User -> NotificationBell.vue: Click notification bell
+NotificationBell.vue -> client.ts: getNotifications()
+client.ts -> notifications.py: GET /notifications
+notifications.py -> notification_service.py: get_user_notifications()
+notification_service.py -> MySQL: SELECT notifications WHERE user_id
+MySQL --> notification_service.py: notifications[]
+notification_service.py --> notifications.py: notifications
+notifications.py --> client.ts: 200 OK
+client.ts --> NotificationBell.vue: notifications
+NotificationBell.vue --> User: Show notification dropdown
+
+User -> NotificationCenter.vue: Click See All
+NotificationCenter.vue -> client.ts: getNotifications(all)
+client.ts -> notifications.py: GET /notifications?page=1
+notifications.py -> notification_service.py: get_user_notifications()
+notification_service.py -> MySQL: SELECT notifications
+MySQL --> notification_service.py: notifications[]
+notification_service.py --> notifications.py: result
+notifications.py --> client.ts: 200 OK
+client.ts --> NotificationCenter.vue: notifications
+NotificationCenter.vue --> User: Display full list
+@enduml

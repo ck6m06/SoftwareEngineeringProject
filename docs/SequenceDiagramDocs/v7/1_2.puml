@@ -1,0 +1,148 @@
+﻿@startuml 使用案例1_2_動物搜尋篩選
+title 使用案例1.2: 動物搜尋篩選流程
+
+actor "使用者\n(訪客/會員)" as User
+participant "Animals.vue" as AnimalsPage
+participant "animals.ts" as AnimalAPI
+participant "animals.py(blueprint)" as AnimalBlueprint
+participant "animal_service.py" as AnimalService
+database "MySQL" as DB
+
+== 1. 初始狀態 ==
+User -> AnimalsPage: 在動物列表頁面
+activate AnimalsPage
+AnimalsPage -> AnimalsPage: 顯示篩選條件區域\n(預設值: 全部)
+
+== 2. 設定篩選條件 ==
+alt 選擇物種
+    User -> AnimalsPage: 選擇物種\n(CAT/DOG)
+    AnimalsPage -> AnimalsPage: 更新 filters.species
+    AnimalsPage -> AnimalsPage: 自動觸發搜尋\n(@change)
+else 選擇性別
+    User -> AnimalsPage: 選擇性別\n(MALE/FEMALE)
+    AnimalsPage -> AnimalsPage: 更新 filters.sex
+    AnimalsPage -> AnimalsPage: 自動觸發搜尋
+else 選擇年齡範圍
+    User -> AnimalsPage: 選擇年齡範圍\n(0-6個月, 6-12個月等)
+    AnimalsPage -> AnimalsPage: 解析年齡範圍\nageRange = "0-6"
+    AnimalsPage -> AnimalsPage: 設定 min_age, max_age
+    AnimalsPage -> AnimalsPage: 自動觸發搜尋
+else 選擇地區
+    User -> AnimalsPage: 選擇縣市\n(台北市、新北市等)
+    AnimalsPage -> AnimalsPage: 更新 filters.region
+    AnimalsPage -> AnimalsPage: 自動觸發搜尋
+else 輸入關鍵字
+    User -> AnimalsPage: 輸入搜尋關鍵字
+    AnimalsPage -> AnimalsPage: 更新 filters.q
+    User -> AnimalsPage: 按 Enter 或點選搜尋
+    AnimalsPage -> AnimalsPage: 觸發 handleSearch()
+end
+
+== 3. 執行搜尋 ==
+AnimalsPage -> AnimalsPage: 組合所有篩選參數
+AnimalsPage -> AnimalAPI: listAnimals(filters)
+activate AnimalAPI
+AnimalAPI -> AnimalBlueprint: GET /animals\n?species=CAT&sex=MALE\n&min_age=0&max_age=6\n&region=台北市&q=橘貓
+activate AnimalBlueprint
+
+AnimalBlueprint -> AnimalBlueprint: 解析查詢參數
+AnimalBlueprint -> AnimalService: list_animals(filters, user_id)
+activate AnimalService
+
+== 4. 建立查詢 ==
+AnimalService -> AnimalService: 建立基礎查詢\nquery = Animal.query
+AnimalService -> AnimalService: 套用狀態篩選\nWHERE status='PUBLISHED'
+
+alt 有物種篩選
+    AnimalService -> AnimalService: 加入條件\nAND species=:species
+end
+
+alt 有性別篩選
+    AnimalService -> AnimalService: 加入條件\nAND sex=:sex
+end
+
+alt 有年齡範圍
+    AnimalService -> AnimalService: 計算出生日期範圍
+    AnimalService -> AnimalService: 加入條件\nAND date_of_birth BETWEEN :min AND :max
+end
+
+alt 有地區篩選
+    AnimalService -> AnimalService: 加入條件\nAND (region=:region\nOR shelter.city=:region)
+end
+
+alt 有關鍵字搜尋
+    AnimalService -> AnimalService: 建立 LIKE 查詢
+    note right
+      搜尋範圍:
+      - animal.name
+      - animal.breed
+      - animal.description
+    end note
+    AnimalService -> AnimalService: 加入條件\nAND (name LIKE :q\nOR breed LIKE :q\nOR description LIKE :q)
+end
+
+AnimalService -> AnimalService: 套用排序\nORDER BY created_at DESC
+AnimalService -> AnimalService: 套用分頁\nLIMIT per_page OFFSET offset
+
+== 5. 執行查詢 ==
+AnimalService -> DB: 執行複合查詢
+activate DB
+DB -> DB: 執行 WHERE 條件篩選
+DB -> DB: 計算總筆數
+DB --> AnimalService: {animals[], total_count}
+deactivate DB
+
+AnimalService -> AnimalService: 載入關聯資料\n(images, shelter)
+AnimalService -> DB: 批次載入圖片
+activate DB
+DB --> AnimalService: images[]
+deactivate DB
+
+AnimalService -> AnimalService: 組裝結果\n{animals[], pagination}
+AnimalService --> AnimalBlueprint: 搜尋結果
+deactivate AnimalService
+AnimalBlueprint --> AnimalAPI: 200 OK\n{animals[], total, pages}
+deactivate AnimalBlueprint
+AnimalAPI --> AnimalsPage: 搜尋結果
+deactivate AnimalAPI
+
+== 6. 顯示搜尋結果 ==
+AnimalsPage -> AnimalsPage: 更新動物列表\nanimals = response.animals
+AnimalsPage -> AnimalsPage: 更新分頁資訊\ntotalPages = response.pages
+AnimalsPage -> AnimalsPage: 顯示結果數量\n「找到 X 隻動物」
+
+alt 有搜尋結果
+    AnimalsPage --> User: 顯示符合條件的動物
+else 無搜尋結果
+    AnimalsPage --> User: 顯示「無符合條件的動物」
+    note right
+      提示使用者:
+      - 調整篩選條件
+      - 清除部分篩選
+    end note
+end
+deactivate AnimalsPage
+
+== 7. 重設條件 ==
+opt 使用者點選重設
+    User -> AnimalsPage: 點選「重設條件」
+    activate AnimalsPage
+    AnimalsPage -> AnimalsPage: 清空所有篩選\nfilters = {}
+    AnimalsPage -> AnimalsPage: 重新載入列表
+    AnimalsPage --> User: 顯示所有動物
+    deactivate AnimalsPage
+end
+
+note over User, DB
+  **後置條件:**
+  1. 顯示符合條件的動物(AND邏輯)
+  2. 無結果時顯示提示訊息
+  3. 篩選條件保持在 UI 上
+  4. 支援多條件組合搜尋
+  
+  **搜尋範圍:**
+  - 物種、性別、年齡、地區
+  - 名稱、品種、描述(關鍵字)
+end note
+
+@enduml
