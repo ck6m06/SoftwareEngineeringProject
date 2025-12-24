@@ -1,44 +1,427 @@
-@startuml
-title Use Case 5.1: User Management (Admin)
-actor Admin
-participant AdminUsers.vue
-participant users.ts
-participant admin.py
-participant user_service.py
-database MySQL
+﻿@startuml 使用案例5_1_使用者管理
+title 使用案例5.1: 使用者管理流程
 
-Admin -> AdminUsers.vue: Visit /admin/users
-AdminUsers.vue -> users.ts: listUsers()
-users.ts -> admin.py: GET /admin/users
-admin.py -> admin.py: Verify admin role
-admin.py -> user_service.py: list_users()
-user_service.py -> MySQL: SELECT users
-MySQL --> user_service.py: users[]
-user_service.py --> admin.py: users
-admin.py --> users.ts: 200 OK
-users.ts --> AdminUsers.vue: users
-AdminUsers.vue --> Admin: Display user list
+actor "管理員" as Admin
+participant "AdminUsers.vue" as AdminPage
+participant "users.ts" as UserAPI
+participant "admin.py(blueprint)" as AdminBlueprint
+participant "admin_service.py" as AdminService
+participant "user.py(model)" as UserModel
+database "MySQL" as DB
 
-alt Update User Status
-  Admin -> AdminUsers.vue: Enable/Disable user
-  AdminUsers.vue -> users.ts: updateUserStatus(user_id, status)
-  users.ts -> admin.py: PATCH /admin/users/{id}
-  admin.py -> user_service.py: update_user_status()
-  user_service.py -> MySQL: UPDATE users SET is_active
-  MySQL --> user_service.py: success
-  user_service.py --> admin.py: user
-  admin.py --> users.ts: 200 OK
-  users.ts --> AdminUsers.vue: success
-  AdminUsers.vue --> Admin: Status updated
-else Reset Password
-  Admin -> AdminUsers.vue: Reset user password
-  AdminUsers.vue -> users.ts: resetUserPassword(user_id)
-  users.ts -> admin.py: POST /admin/users/{id}/reset-password
-  admin.py -> user_service.py: reset_password()
-  user_service.py -> MySQL: UPDATE users SET password_hash
-  user_service.py --> admin.py: success
-  admin.py --> users.ts: 200 OK
-  users.ts --> AdminUsers.vue: success
-  AdminUsers.vue --> Admin: Password reset
+== 1. 進入使用者管理頁面 ==
+Admin -> AdminPage: 訪問「/admin/users」路由
+activate AdminPage
+AdminPage -> AdminPage: onMounted()\n初始化頁面
+note right
+  路由層級權限保護:
+  - router/index.ts 設定 requiresAuth + role: 'ADMIN'
+  - 若非 ADMIN，路由自動重定向
+  - 前端不需額外權限檢查
+end note
+
+== 2. 初始化篩選條件 ==
+AdminPage -> AdminPage: 初始化狀態變數
+note right
+  初始狀態:
+  - searchQuery = ''''
+  - filterRole = ''''
+  - pagination.page = 1
+  - pagination.per_page = 20
+end note
+
+== 3. 載入使用者清單 ==
+AdminPage -> UserAPI: fetchUsers()\n建構查詢參數
+activate UserAPI
+note right
+  查詢參數:
+  - page (頁碼)
+  - per_page (每頁數量)
+  - role (角色篩選, 可選)
+  - search (關鍵字搜尋, 可選)
+end note
+UserAPI -> AdminBlueprint: GET /admin/users\n?page=1&per_page=20\n(JWT Token)
+activate AdminBlueprint
+
+== 4. 驗證管理員權限 ==
+AdminBlueprint -> AdminBlueprint: @jwt_required()\nget_jwt_identity()
+AdminBlueprint -> AdminBlueprint: require_admin()\n調用權限檢查函數
+note right
+  require_admin() 實現:
+  1. current_user_id = int(get_jwt_identity())
+  2. user = User.query.get(current_user_id)
+  3. if not user or user.role != ADMIN:
+     abort(403, message='僅管理員可執行此操作')
+  4. return user
+end note
+AdminBlueprint -> UserModel: User.query.get(current_user_id)
+activate UserModel
+UserModel -> DB: SELECT * FROM users\nWHERE user_id = :current_user_id
+activate DB
+DB --> UserModel: user 資料
+deactivate DB
+UserModel --> AdminBlueprint: User 物件
+deactivate UserModel
+
+AdminBlueprint -> AdminBlueprint: 檢查 user.role == UserRole.ADMIN
+alt user is None OR user.role != ADMIN
+    AdminBlueprint --> UserAPI: 403 Forbidden\n{"message": "僅管理員可執行此操作"}
+    UserAPI --> AdminPage: Error: 權限不足
+    AdminPage --> Admin: ❌ 權限不足，無法訪問
+    note right
+      abort(403) 直接中斷執行
+      - 非管理員用戶
+      - 返回 403 Forbidden
+    end note
+else user.role == ADMIN
+    note right
+      管理員權限確認通過
+      require_admin() 返回 user 物件
+    end note
 end
+
+== 5. 解析查詢參數並調用 Service ==
+AdminBlueprint -> AdminBlueprint: 解析查詢參數
+note right
+  Blueprint 層級參數解析:
+  - page = request.args.get('page', 1, type=int)
+  - per_page = request.args.get('per_page', 20, type=int)
+  - role = request.args.get('role')  # Optional[str]
+  - search = request.args.get('search')  # Optional[str]
+end note
+AdminBlueprint -> AdminService: list_all_users(\npage, per_page, role, search)
+activate AdminService
+
+== 6. 建立查詢條件 ==
+AdminService -> AdminService: 驗證 per_page 上限\nper_page = min(per_page, 100)
+AdminService -> AdminService: 建立查詢基礎\nquery = User.query.filter_by(deleted_at=None)
+
+alt role 參數存在
+    AdminService -> AdminService: 驗證角色 enum\nrole_enum = UserRole(role)
+    alt 無效角色值
+        AdminService --> AdminBlueprint: raise ValidationError\n''無效的角色: {role}''
+        AdminBlueprint --> UserAPI: 400 Bad Request
+        UserAPI --> AdminPage: Error: 無效角色
+        AdminPage --> Admin: ❌ 篩選條件錯誤
+    else 有效角色
+        AdminService -> AdminService: 套用角色篩選\nquery.filter(User.role == role_enum)
+    end
+end
+
+alt search 參數存在
+    AdminService -> AdminService: 套用搜尋條件
+    note right
+      搜尋範圍:
+      - User.username ILIKE ''%search%''
+      - User.email ILIKE ''%search%''
+      - 使用 OR 邏輯
+    end note
+    AdminService -> AdminService: query.filter(\ndb.or_(username LIKE, email LIKE))
+end
+
+== 7. 執行查詢並分頁 ==
+AdminService -> AdminService: 套用排序\nquery.order_by(User.created_at.desc())\n(最新註冊優先)
+AdminService -> UserModel: query.paginate(\npage, per_page, error_out=False)
+activate UserModel
+note right
+  SQLAlchemy ORM:
+  - order_by(User.created_at.desc())
+  - paginate() 自動計算 offset
+  - error_out=False 避免超出範圍錯誤
+end note
+UserModel -> DB: SELECT * FROM users\nWHERE deleted_at IS NULL\n[AND role = :role]\n[AND (username ILIKE :search OR email ILIKE :search)]\nORDER BY created_at DESC\nLIMIT :per_page OFFSET :offset
+activate DB
+DB --> UserModel: users[] + 總筆數
+deactivate DB
+UserModel --> AdminService: pagination 物件
+deactivate UserModel
+
+== 8. 組裝回應資料 ==
+AdminService -> AdminService: 組裝回應
+note right
+  回應資料:
+  - total (總筆數)
+  - page (當前頁碼)
+  - per_page (每頁數量)
+  - users[] (用戶列表)
+end note
+loop 每個 user
+    AdminService -> AdminService: user.to_dict()
+    note right
+      user.to_dict() 包含:
+      - user_id, email, username
+      - role, verified
+      - phone_number, first_name, last_name
+      - created_at, updated_at
+    end note
+end
+AdminService --> AdminBlueprint: {total, page, per_page, users[]}
+deactivate AdminService
+AdminBlueprint --> UserAPI: 200 OK\n{total, page, per_page, users[]}
+deactivate AdminBlueprint
+UserAPI --> AdminPage: {total, page, per_page, users[]}
+deactivate UserAPI
+
+== 9. 渲染使用者清單 ==
+AdminPage -> AdminPage: users = response.users
+AdminPage -> AdminPage: pagination = {page, per_page, pages, total}
+AdminPage -> AdminPage: 計算總頁數\npages = Math.ceil(total / per_page)
+note right
+  前端分頁計算:
+  - total: 總用戶數
+  - per_page: 每頁數量 (預設 20)
+  - pages: 總頁數 = ⌈total / per_page⌉
+  - page: 當前頁碼
+end note
+AdminPage -> AdminPage: 渲染表格
+loop 每個使用者
+    AdminPage -> AdminPage: 顯示使用者資訊:
+    note right
+      表格欄位:
+      - ID
+      - 用戶名稱 (with avatar)
+      - Email
+      - 角色徽章 (顏色標示)
+      - 驗證狀態 (✓/✗)
+      - 註冊時間
+      - 操作按鈕
+    end note
+    AdminPage -> AdminPage: 顯示角色徽章
+    note right
+      角色顏色:
+      - ADMIN: 紫色
+      - SHELTER_MEMBER: 藍色
+      - GENERAL_MEMBER: 綠色
+    end note
+    alt user.role !== ADMIN
+        AdminPage -> AdminPage: 顯示「查看」和「封禁」按鈕
+    else user.role === ADMIN
+        AdminPage -> AdminPage: 僅顯示「查看」按鈕\n(不能封禁管理員)
+    end
+end
+
+AdminPage -> AdminPage: 顯示分頁控制項
+AdminPage --> Admin: 顯示使用者清單\n(預設20筆/頁)
+deactivate AdminPage
+
+== 10. 使用者互動操作 ==
+alt 點選「查看」按鈕
+    Admin -> AdminPage: 點選「查看」按鈕
+    activate AdminPage
+    AdminPage -> AdminPage: viewUser(user)\nselectedUser = user
+    AdminPage -> AdminPage: showUserModal = true
+    AdminPage --> Admin: 顯示使用者詳情 Modal
+    note right
+      Modal 顯示:
+      - 完整使用者資訊
+      - 包含手機、姓名等
+      - 驗證狀態
+      - 註冊時間
+    end note
+    deactivate AdminPage
+    
+else 點選「封禁」按鈕
+    Admin -> AdminPage: 點選「封禁」按鈕
+    activate AdminPage
+    AdminPage -> AdminPage: openBanModal(user)\nbanTarget = user
+    AdminPage -> AdminPage: banDays = 30\nbanReason = ''''
+    AdminPage -> AdminPage: showBanModal = true
+    AdminPage --> Admin: 顯示封禁確認 Modal
+    deactivate AdminPage
+    
+    Admin -> AdminPage: 填寫封禁資訊\n(天數、原因)
+    activate AdminPage
+    Admin -> AdminPage: 點選「確認封禁」
+    AdminPage -> AdminPage: confirmBan()
+    AdminPage -> UserAPI: banUser(user_id, days, reason)
+    activate UserAPI
+    UserAPI -> AdminBlueprint: POST /admin/users/{id}/ban\n{days, reason}\n(JWT Token)
+    activate AdminBlueprint
+    
+    AdminBlueprint -> AdminBlueprint: require_admin()\n驗證管理員權限
+    AdminBlueprint -> AdminService: ban_user(\nuser_id, admin_id, reason, days)
+    activate AdminService
+    
+    == 11. 執行封禁操作 ==
+    AdminService -> UserModel: db.session.get(User, user_id)
+    activate UserModel
+    UserModel -> DB: SELECT * FROM users\nWHERE user_id = :user_id
+    activate DB
+    DB --> UserModel: user 資料
+    deactivate DB
+    UserModel --> AdminService: User 物件
+    deactivate UserModel
+    
+    alt user is None
+        AdminService --> AdminBlueprint: raise NotFoundError\n''用戶不存在''
+        AdminBlueprint --> UserAPI: 404 Not Found
+        UserAPI --> AdminPage: Error: 用戶不存在
+        AdminPage --> Admin: ❌ 封禁失敗
+    else user.role == ADMIN
+        AdminService --> AdminBlueprint: raise PermissionDeniedError\n''不能封禁管理員''
+        AdminBlueprint --> UserAPI: 403 Forbidden
+        UserAPI --> AdminPage: Error: 不能封禁管理員
+        AdminPage --> Admin: ❌ 不能封禁管理員
+    else 正常用戶
+        AdminService -> AdminService: 計算封禁到期時間\nlocked_until = utcnow() + timedelta(days)
+        AdminService -> AdminService: user.locked_until = locked_until
+        
+        == 12. 提交資料庫變更 ==
+        AdminService -> UserModel: db.session.commit()
+        activate UserModel
+        UserModel -> DB: UPDATE users\nSET locked_until = :locked_until\nWHERE user_id = :user_id
+        activate DB
+        DB --> UserModel: 更新成功
+        deactivate DB
+        UserModel --> AdminService: commit 成功
+        deactivate UserModel
+        
+        == 13. 記錄審計日誌 ==
+        AdminService -> AdminService: audit_service.log_user_ban(\ntarget_user_id, admin_id, days, reason)
+        note right
+          審計日誌記錄:
+          - action = 'user.ban'
+          - actor_id = admin_id (執行者)
+          - target_type = 'user'
+          - target_id = target_user_id (被封禁者)
+          - after_state = {days, reason}
+        end note
+        
+        AdminService --> AdminBlueprint: User 物件
+        deactivate AdminService
+        AdminBlueprint --> UserAPI: 200 OK\n{message, user, locked_until}
+        deactivate AdminBlueprint
+        UserAPI --> AdminPage: 封禁成功
+        deactivate UserAPI
+        AdminPage -> AdminPage: closeBanModal()\n重新載入列表
+        AdminPage --> Admin: ✅ 已成功封禁用戶
+        deactivate AdminPage
+    end
+    
+else 使用篩選功能
+    Admin -> AdminPage: 選擇角色篩選
+    activate AdminPage
+    AdminPage -> AdminPage: filterRole = ''SHELTER_MEMBER''\n@change 事件觸發
+    AdminPage -> AdminPage: pagination.page = 1\n重設頁碼
+    AdminPage -> UserAPI: fetchUsers()\n附加 role 參數
+    note right: 回到步驟 3
+    deactivate AdminPage
+    
+else 使用搜尋功能
+    Admin -> AdminPage: 輸入搜尋關鍵字
+    activate AdminPage
+    AdminPage -> AdminPage: searchQuery 變更\n@input 事件觸發
+    AdminPage -> AdminPage: debouncedSearch()\n防抖處理 (500ms)
+    note right
+      防抖機制:
+      - 使用 setTimeout
+      - 延遲 500ms 執行
+      - 避免頻繁請求
+    end note
+    AdminPage -> AdminPage: pagination.page = 1\n重設頁碼
+    AdminPage -> UserAPI: fetchUsers()\n附加 search 參數
+    note right: 回到步驟 3
+    deactivate AdminPage
+    
+else 切換分頁
+    Admin -> AdminPage: 點選「下一頁」
+    activate AdminPage
+    AdminPage -> AdminPage: goToPage(page + 1)
+    AdminPage -> AdminPage: pagination.page++
+    AdminPage -> UserAPI: fetchUsers()
+    note right: 回到步驟 3
+    deactivate AdminPage
+    
+else 點選「刷新」按鈕
+    Admin -> AdminPage: 點選「刷新」按鈕
+    activate AdminPage
+    AdminPage -> UserAPI: fetchUsers()
+    note right: 回到步驟 3
+    deactivate AdminPage
+end
+
+== 14. 錯誤處理情境 ==
+note over Admin, DB
+  **可能的錯誤情境:**
+  
+  1. **權限錯誤 (403 Forbidden):**
+     - 非管理員用戶嘗試訪問
+     - 嘗試封禁管理員
+     - 顯示: "僅管理員可執行此操作"
+  
+  2. **用戶不存在 (404 Not Found):**
+     - 封禁時用戶已被刪除
+     - 用戶 ID 不存在
+     - 顯示: "用戶不存在"
+  
+  3. **驗證錯誤 (400 Bad Request):**
+     - 無效的角色值
+     - 無效的分頁參數
+     - 顯示: "無效的角色: XXX"
+  
+  4. **JWT Token 錯誤 (401 Unauthorized):**
+     - Token 過期
+     - Token 無效
+     - 自動跳轉至登入頁
+end note
+
+== 15. 資料顯示規則 ==
+note over Admin, DB
+  **使用者清單顯示規則:**
+  
+  **角色徽章顏色:**
+  - ADMIN: 紫色 (role-admin)
+  - SHELTER_MEMBER: 藍色 (role-shelter)
+  - GENERAL_MEMBER: 綠色 (role-general)
+  
+  **驗證狀態:**
+  - verified = true: ✓ 已驗證 (綠色)
+  - verified = false: ✗ 未驗證 (灰色)
+  
+  **操作按鈕:**
+  - 所有用戶: 「查看」按鈕
+  - 非管理員: 「查看」+「封禁」按鈕
+  - 管理員: 僅「查看」按鈕 (不能封禁)
+  
+  **搜尋範圍:**
+  - username (用戶名稱)
+  - email (電子郵件)
+  - 使用 ILIKE (不區分大小寫)
+  
+  **分頁限制:**
+  - 預設每頁 20 筆
+  - 最大每頁 100 筆
+  - 顯示總頁數和總筆數
+end note
+
+note over Admin, DB
+  **後置條件:**
+  1. 使用者清單已載入並顯示
+  2. 支援角色篩選和關鍵字搜尋
+  3. 支援分頁瀏覽
+  4. 管理員可查看用戶詳情
+  5. 管理員可封禁非管理員用戶
+  6. 封禁操作會記錄審計日誌
+  
+  **權限控制:**
+  - 僅管理員可訪問此頁面 (路由層級 + API 層級雙重保護)
+  - 管理員可查看所有用戶
+  - 管理員可封禁非管理員用戶
+  - 不能封禁其他管理員 (user.role == ADMIN 檢查)
+  - 所有操作記錄審計日誌 (action = 'user.ban')
+  
+  **資料一致性:**
+  - 封禁設定 locked_until 時間戳 (datetime + timedelta)
+  - 用戶歷史資料保留 (不會刪除)
+  - 封禁用戶不會刪除資料 (只設 locked_until)
+  - 審計日誌完整記錄 (target_user_id, admin_id, days, reason)
+  
+  **效能優化:**
+  - 使用分頁避免載入過多資料 (預設 20 筆/頁，最多 100 筆)
+  - 搜尋使用 debounce 防抖 (500ms)
+  - 角色篩選減少查詢範圍 (filter by UserRole enum)
+  - 索引優化 (email, created_at)
+  - ILIKE 不區分大小寫搜尋
+end note
+
 @enduml

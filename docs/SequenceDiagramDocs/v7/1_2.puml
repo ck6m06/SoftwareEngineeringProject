@@ -1,12 +1,16 @@
 ﻿@startuml 使用案例1_2_動物搜尋篩選
 title 使用案例1.2: 動物搜尋篩選流程
 
-actor "使用者\n(訪客/會員)" as User
+actor "所有使用者" as User
 participant "Animals.vue" as AnimalsPage
 participant "animals.ts" as AnimalAPI
 participant "animals.py(blueprint)" as AnimalBlueprint
 participant "animal_service.py" as AnimalService
+participant "animal.py(model)" as AnimalModel
+participant "shelter.py(model)" as ShelterModel
+participant "user.py(model)" as UserModel
 database "MySQL" as DB
+participant "MinIO" as Storage
 
 == 1. 初始狀態 ==
 User -> AnimalsPage: 在動物列表頁面
@@ -17,132 +21,379 @@ AnimalsPage -> AnimalsPage: 顯示篩選條件區域\n(預設值: 全部)
 alt 選擇物種
     User -> AnimalsPage: 選擇物種\n(CAT/DOG)
     AnimalsPage -> AnimalsPage: 更新 filters.species
-    AnimalsPage -> AnimalsPage: 自動觸發搜尋\n(@change)
+    AnimalsPage -> AnimalsPage: 自動觸發搜尋\n(@change 事件)
 else 選擇性別
     User -> AnimalsPage: 選擇性別\n(MALE/FEMALE)
     AnimalsPage -> AnimalsPage: 更新 filters.sex
-    AnimalsPage -> AnimalsPage: 自動觸發搜尋
+    AnimalsPage -> AnimalsPage: 自動觸發搜尋\n(@change 事件)
 else 選擇年齡範圍
     User -> AnimalsPage: 選擇年齡範圍\n(0-6個月, 6-12個月等)
+    AnimalsPage -> AnimalsPage: 觸發 handleAgeChange()
     AnimalsPage -> AnimalsPage: 解析年齡範圍\nageRange = "0-6"
-    AnimalsPage -> AnimalsPage: 設定 min_age, max_age
-    AnimalsPage -> AnimalsPage: 自動觸發搜尋
+    AnimalsPage -> AnimalsPage: 設定 min_age = 0, max_age = 6
+    note right
+      特殊處理:
+      - max_age = 999 時不傳送
+      - 表示無上限 (7歲以上)
+    end note
+    AnimalsPage -> AnimalsPage: 呼叫 handleSearch()
 else 選擇地區
     User -> AnimalsPage: 選擇縣市\n(台北市、新北市等)
     AnimalsPage -> AnimalsPage: 更新 filters.region
-    AnimalsPage -> AnimalsPage: 自動觸發搜尋
+    AnimalsPage -> AnimalsPage: 自動觸發搜尋\n(@change 事件)
+else 選擇來源
+    User -> AnimalsPage: 選擇來源\n(收容所/個人送養)
+    AnimalsPage -> AnimalsPage: 更新 filters.source_type\n('shelter' 或 'personal')
+    AnimalsPage -> AnimalsPage: 自動觸發搜尋\n(@change 事件)
 else 輸入關鍵字
-    User -> AnimalsPage: 輸入搜尋關鍵字
+    User -> AnimalsPage: 輸入搜尋關鍵字\n(在名稱、品種欄位)
     AnimalsPage -> AnimalsPage: 更新 filters.q
-    User -> AnimalsPage: 按 Enter 或點選搜尋
+    User -> AnimalsPage: 按 Enter 或點選搜尋按鈕
     AnimalsPage -> AnimalsPage: 觸發 handleSearch()
 end
 
 == 3. 執行搜尋 ==
+AnimalsPage -> AnimalsPage: handleSearch()\n重設 filters.page = 1
 AnimalsPage -> AnimalsPage: 組合所有篩選參數
-AnimalsPage -> AnimalAPI: listAnimals(filters)
+note right
+  篩選參數結構:
+  {
+    species: 'CAT',
+    sex: 'MALE',
+    min_age: 0,
+    max_age: 6,
+    region: '台北市',
+    source_type: 'shelter',
+    q: '橘貓',
+    status: 'PUBLISHED',
+    page: 1,
+    per_page: 12
+  }
+end note
+
+AnimalsPage -> AnimalAPI: getAnimals(filters)
 activate AnimalAPI
-AnimalAPI -> AnimalBlueprint: GET /animals\n?species=CAT&sex=MALE\n&min_age=0&max_age=6\n&region=台北市&q=橘貓
+AnimalAPI -> AnimalBlueprint: GET /animals\n?species=CAT&sex=MALE\n&min_age=0&max_age=6\n&region=台北市\n&source_type=shelter\n&q=橘貓\n&status=PUBLISHED\n&page=1&per_page=12
 activate AnimalBlueprint
 
-AnimalBlueprint -> AnimalBlueprint: 解析查詢參數
-AnimalBlueprint -> AnimalService: list_animals(filters, user_id)
+AnimalBlueprint -> AnimalBlueprint: 檢查 JWT Token (可選)\nverify_jwt_in_request(optional=True)
+AnimalBlueprint -> AnimalBlueprint: 解析查詢參數\n收集 filters dict
+AnimalBlueprint -> AnimalService: list_animals(filters, current_user_id)
 activate AnimalService
 
 == 4. 建立查詢 ==
-AnimalService -> AnimalService: 建立基礎查詢\nquery = Animal.query
-AnimalService -> AnimalService: 套用狀態篩選\nWHERE status='PUBLISHED'
+AnimalService -> AnimalService: 取得分頁參數\npage=1, per_page=12 (最多100)
+AnimalService -> AnimalService: 建立基礎查詢\nquery = Animal.query.filter_by(deleted_at=None)
+
+AnimalService -> AnimalService: 檢查並套用狀態篩選
+note right
+  預設邏輯:
+  - 若 filters.status 為空
+  - 自動設為 PUBLISHED
+  - 只顯示已發布動物
+end note
+AnimalService -> AnimalService: 轉換狀態為 Enum\nstatus_enum = AnimalStatus(status)
+AnimalService -> AnimalService: query.filter_by(status=status_enum)
 
 alt 有物種篩選
-    AnimalService -> AnimalService: 加入條件\nAND species=:species
+    AnimalService -> AnimalService: 轉換物種為 Enum\nspecies_enum = Species(species)
+    AnimalService -> AnimalService: query.filter_by(species=species_enum)
+    note right: AND species='CAT'
 end
 
 alt 有性別篩選
-    AnimalService -> AnimalService: 加入條件\nAND sex=:sex
+    AnimalService -> AnimalService: 轉換性別為 Enum\nsex_enum = Sex(sex)
+    AnimalService -> AnimalService: query.filter_by(sex=sex_enum)
+    note right: AND sex='MALE'
 end
 
-alt 有年齡範圍
-    AnimalService -> AnimalService: 計算出生日期範圍
-    AnimalService -> AnimalService: 加入條件\nAND date_of_birth BETWEEN :min AND :max
+alt 有來源類型篩選
+    AnimalService -> AnimalService: 檢查 source_type
+    alt source_type == 'shelter'
+        AnimalService -> AnimalService: query.filter(Animal.shelter_id.isnot(None))
+        note right: AND shelter_id IS NOT NULL
+    else source_type == 'personal'
+        AnimalService -> AnimalService: query.filter(Animal.owner_id.isnot(None))
+        note right: AND owner_id IS NOT NULL
+    end
 end
 
 alt 有地區篩選
-    AnimalService -> AnimalService: 加入條件\nAND (region=:region\nOR shelter.city=:region)
+    AnimalService -> AnimalService: 建立地區子查詢
+    note right
+      使用 EXISTS 子查詢:
+      1. shelter_region_condition
+         - JOIN Shelter
+         - WHERE region LIKE '%台北市%'
+      2. owner_region_condition
+         - JOIN User
+         - WHERE region LIKE '%台北市%'
+    end note
+    AnimalService -> AnimalService: shelter_condition = exists()\n.where(Animal.shelter_id == Shelter.shelter_id)\n.where(Shelter.region.like('%台北市%'))
+    AnimalService -> AnimalService: owner_condition = exists()\n.where(Animal.owner_id == User.user_id)\n.where(User.region.like('%台北市%'))
+    AnimalService -> AnimalService: query.filter(or_(shelter_condition, owner_condition))
+end
+
+alt 有年齡範圍篩選
+    AnimalService -> AnimalService: 檢查資料庫引擎類型\nengine_name = db.engine.name
+    
+    alt engine_name == 'sqlite'
+        AnimalService -> AnimalService: 使用 julianday 計算月齡\nage_in_months = (julianday('now') - julianday(dob)) / 30.44
+        note right
+          SQLite 日期計算:
+          - julianday('now') 取得當前日期
+          - julianday(dob) 取得出生日期
+          - 天數差 ÷ 30.44 = 月數
+        end note
+    else engine_name == 'mysql'
+        AnimalService -> AnimalService: 使用 timestampdiff 計算月齡\nage_in_months = timestampdiff(MONTH, dob, curdate())
+        note right
+          MySQL 日期計算:
+          - timestampdiff 直接計算月份差
+          - 更精確的月齡計算
+        end note
+    end
+    
+    alt min_age 有值
+        AnimalService -> AnimalService: query.filter(age_in_months >= min_age)
+        note right: AND 月齡 >= 0
+    end
+    
+    alt max_age 有值
+        AnimalService -> AnimalService: query.filter(age_in_months <= max_age)
+        note right: AND 月齡 <= 6
+    end
 end
 
 alt 有關鍵字搜尋
-    AnimalService -> AnimalService: 建立 LIKE 查詢
+    AnimalService -> AnimalService: 建立 LIKE 查詢\nq = '橘貓'
     note right
       搜尋範圍:
-      - animal.name
-      - animal.breed
-      - animal.description
+      - Animal.name (名稱)
+      - Animal.breed (品種)
+      - Animal.description (描述)
+      使用 OR 邏輯
     end note
-    AnimalService -> AnimalService: 加入條件\nAND (name LIKE :q\nOR breed LIKE :q\nOR description LIKE :q)
+    AnimalService -> AnimalService: query.filter(or_(Animal.name.like('%橘貓%'), Animal.breed.like('%橘貓%'), Animal.description.like('%橘貓%')))
 end
 
-AnimalService -> AnimalService: 套用排序\nORDER BY created_at DESC
-AnimalService -> AnimalService: 套用分頁\nLIMIT per_page OFFSET offset
+AnimalService -> AnimalService: 套用排序\nquery.order_by(Animal.created_at.desc())
+note right
+  排序規則:
+  - 最新上架優先
+  - DESC 降冪排列
+end note
+
+AnimalService -> AnimalService: 套用分頁\nquery.paginate(page=1, per_page=12)
 
 == 5. 執行查詢 ==
-AnimalService -> DB: 執行複合查詢
+AnimalService -> AnimalModel: query.paginate(page, per_page)
+activate AnimalModel
+AnimalModel -> DB: 執行複合 SQL 查詢
 activate DB
-DB -> DB: 執行 WHERE 條件篩選
-DB -> DB: 計算總筆數
-DB --> AnimalService: {animals[], total_count}
-deactivate DB
+note right
+  完整 SQL 範例:
+  SELECT * FROM animals
+  WHERE deleted_at IS NULL
+    AND status = 'PUBLISHED'
+    AND species = 'CAT'
+    AND sex = 'MALE'
+    AND EXISTS (...)
+    AND (name LIKE '%橘貓%' OR breed LIKE '%橘貓%')
+  ORDER BY created_at DESC
+  LIMIT 12 OFFSET 0
+end note
 
-AnimalService -> AnimalService: 載入關聯資料\n(images, shelter)
-AnimalService -> DB: 批次載入圖片
+DB -> DB: 執行 WHERE 條件篩選\n(多條件 AND 邏輯)
+DB -> DB: 執行子查詢 (地區 EXISTS)
+DB -> DB: 執行 LIKE 模糊搜尋\n(關鍵字 OR 邏輯)
+DB -> DB: 計算總筆數 (COUNT(*))
+DB -> DB: 套用分頁 (LIMIT + OFFSET)
+DB --> AnimalModel: animals[] + total_count
+deactivate DB
+AnimalModel --> AnimalService: pagination 物件\n{items[], total, page, pages}
+deactivate AnimalModel
+
+== 6. 載入關聯資料 ==
+AnimalService -> AnimalService: 批次載入關聯資料\n避免 N+1 查詢問題
+
+AnimalService -> AnimalModel: 載入圖片關聯\n(images relationship)
+activate AnimalModel
+AnimalModel -> DB: SELECT * FROM attachments\nWHERE animal_id IN (...)\nAND type='IMAGE'\nORDER BY display_order
 activate DB
-DB --> AnimalService: images[]
+DB --> AnimalModel: images[]
 deactivate DB
+AnimalModel --> AnimalService: 圖片列表
+deactivate AnimalModel
 
-AnimalService -> AnimalService: 組裝結果\n{animals[], pagination}
-AnimalService --> AnimalBlueprint: 搜尋結果
+AnimalService -> ShelterModel: 載入收容所資訊\n(shelter relationship)
+activate ShelterModel
+ShelterModel -> DB: SELECT * FROM shelters\nWHERE shelter_id IN (...)
+activate DB
+DB --> ShelterModel: shelters[]
+deactivate DB
+ShelterModel --> AnimalService: 收容所資訊
+deactivate ShelterModel
+
+AnimalService -> UserModel: 載入送養者資訊\n(owner relationship)
+activate UserModel
+UserModel -> DB: SELECT * FROM users\nWHERE user_id IN (...)
+activate DB
+DB --> UserModel: users[]
+deactivate DB
+UserModel --> AnimalService: 送養者資訊
+deactivate UserModel
+
+== 7. 組裝回應資料 ==
+AnimalService -> AnimalService: 批次載入關聯資料\n(避免 N+1 查詢問題)
+
+AnimalService -> AnimalModel: 載入圖片關聯\n(images relationship)
+activate AnimalModel
+AnimalModel -> DB: SELECT * FROM attachments\nWHERE animal_id IN (...)\nAND type='IMAGE'\nORDER BY display_order
+activate DB
+DB --> AnimalModel: images[]
+deactivate DB
+AnimalModel --> AnimalService: 圖片列表
+deactivate AnimalModel
+
+AnimalService -> AnimalModel: 載入送養者資訊\n(shelter/owner relationship)
+activate AnimalModel
+AnimalModel -> DB: SELECT * FROM shelters\nWHERE shelter_id IN (...)
+activate DB
+DB --> AnimalModel: shelters[]
+deactivate DB
+AnimalModel -> DB: SELECT * FROM users\nWHERE user_id IN (...)
+activate DB
+DB --> AnimalModel: users[]
+deactivate DB
+AnimalModel --> AnimalService: 送養者資訊
+deactivate AnimalModel
+
+== 6. 檢查待審核申請 ==
+loop 每個動物
+    AnimalService -> AnimalModel: animal.has_pending_application()
+    activate AnimalModel
+    AnimalModel -> DB: SELECT * FROM applications\nWHERE animal_id = :id\nAND status IN ('PENDING', 'UNDER_REVIEW')\nLIMIT 1
+    activate DB
+    DB --> AnimalModel: 是否有待審核申請
+    deactivate DB
+    AnimalModel --> AnimalService: has_pending_application (boolean)
+    deactivate AnimalModel
+end
+
+== 7. 組裝回應資料 ==
+AnimalService -> AnimalService: 呼叫 animal.to_dict(include_relations=True)
+note right
+  序列化資料:
+  - 動物基本資料
+  - 圖片列表 (images[])
+  - 送養者資訊 (shelter/owner)
+  - 關聯資料完整載入
+end note
+
+AnimalService -> AnimalService: 組裝回應結構\n{animals: [...], total, page, per_page, pages}
+
+AnimalService --> AnimalBlueprint: {animals[], pagination}
 deactivate AnimalService
-AnimalBlueprint --> AnimalAPI: 200 OK\n{animals[], total, pages}
+AnimalBlueprint --> AnimalAPI: 200 OK\n{animals[], total, page, per_page, pages}
 deactivate AnimalBlueprint
 AnimalAPI --> AnimalsPage: 搜尋結果
 deactivate AnimalAPI
 
-== 6. 顯示搜尋結果 ==
-AnimalsPage -> AnimalsPage: 更新動物列表\nanimals = response.animals
-AnimalsPage -> AnimalsPage: 更新分頁資訊\ntotalPages = response.pages
+== 8. 顯示搜尋結果 ==
+AnimalsPage -> AnimalsPage: 更新動物列表\nanimals.value = response.animals
+AnimalsPage -> AnimalsPage: 更新分頁資訊\npagination = response
 AnimalsPage -> AnimalsPage: 顯示結果數量\n「找到 X 隻動物」
 
-alt 有搜尋結果
-    AnimalsPage --> User: 顯示符合條件的動物
-else 無搜尋結果
+alt 有搜尋結果 (animals.length > 0)
+    AnimalsPage -> AnimalsPage: 渲染動物卡片列表
+    loop 每個動物
+        AnimalsPage -> AnimalsPage: 使用 AnimalCard 組件顯示
+        note right
+          AnimalCard 顯示:
+          - 動物圖片 (第一張)
+          - 名稱、物種、性別
+          - 年齡、品種
+          - 送養者資訊
+        end note
+    end
+    AnimalsPage -> AnimalsPage: 顯示分頁控制項
+    AnimalsPage --> User: 顯示符合條件的動物列表
+else 無搜尋結果 (animals.length === 0)
+    AnimalsPage -> AnimalsPage: 顯示空狀態訊息
     AnimalsPage --> User: 顯示「無符合條件的動物」
     note right
       提示使用者:
       - 調整篩選條件
       - 清除部分篩選
+      - 或點選「清除篩選」按鈕
     end note
 end
 deactivate AnimalsPage
 
-== 7. 重設條件 ==
-opt 使用者點選重設
-    User -> AnimalsPage: 點選「重設條件」
+== 9. 重設條件 ==
+opt 使用者點選清除篩選
+    User -> AnimalsPage: 點選「清除篩選」按鈕
     activate AnimalsPage
-    AnimalsPage -> AnimalsPage: 清空所有篩選\nfilters = {}
-    AnimalsPage -> AnimalsPage: 重新載入列表
-    AnimalsPage --> User: 顯示所有動物
+    AnimalsPage -> AnimalsPage: 觸發 handleReset()
+    AnimalsPage -> AnimalsPage: 清空所有篩選條件\nfilters = 預設值
+    AnimalsPage -> AnimalsPage: 重設頁碼 filters.page = 1
+    AnimalsPage -> AnimalAPI: 重新載入動物列表\nloadAnimals()
+    note right: 回到步驟 3, 重新執行搜尋
+    AnimalsPage --> User: 顯示所有已發布動物\n(無任何篩選)
+    deactivate AnimalsPage
+end
+
+== 10. 使用者後續操作 ==
+alt 點選動物卡片
+    User -> AnimalsPage: 點選動物卡片
+    activate AnimalsPage
+    AnimalsPage -> AnimalsPage: router.push('/animals/:id')
+    AnimalsPage --> User: 導航至動物詳情頁
+    note right
+      進入使用案例 1.3
+      動物詳情檢視
+    end note
+    deactivate AnimalsPage
+else 切換分頁
+    User -> AnimalsPage: 點選分頁按鈕
+    activate AnimalsPage
+    AnimalsPage -> AnimalsPage: goToPage(page)
+    AnimalsPage -> AnimalsPage: 更新 filters.page
+    AnimalsPage -> AnimalsPage: window.scrollTo(top:0)
+    AnimalsPage -> AnimalAPI: 重新載入該頁動物
+    note right: 回到步驟 3, 保持篩選條件
     deactivate AnimalsPage
 end
 
 note over User, DB
   **後置條件:**
-  1. 顯示符合條件的動物(AND邏輯)
-  2. 無結果時顯示提示訊息
+  1. 顯示符合條件的動物 (多條件 AND 邏輯)
+  2. 無結果時顯示友善提示訊息
   3. 篩選條件保持在 UI 上
   4. 支援多條件組合搜尋
+  5. 支援分頁瀏覽 (12筆/頁)
   
   **搜尋範圍:**
-  - 物種、性別、年齡、地區
-  - 名稱、品種、描述(關鍵字)
+  - 物種 (CAT/DOG)
+  - 性別 (MALE/FEMALE)
+  - 年齡範圍 (月齡)
+  - 地區 (縣市)
+  - 來源類型 (收容所/個人)
+  - 關鍵字 (名稱、品種、描述)
+  
+  **效能優化:**
+  - 批次載入關聯資料避免 N+1
+  - 使用 EXISTS 子查詢優化地區搜尋
+  - 資料庫層級計算年齡
+  - 前端自動觸發搜尋 (@change)
+  
+  **資料一致性:**
+  - 使用 Enum 驗證參數正確性
+  - 預設只顯示 PUBLISHED 動物
+  - 軟刪除資料不會出現
+  - Model 層負責 ORM 查詢
+  - Service 層處理業務邏輯
 end note
 
 @enduml

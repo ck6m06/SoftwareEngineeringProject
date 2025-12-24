@@ -1,86 +1,245 @@
 ﻿@startuml 使用案例1_1_動物列表瀏覽
 title 使用案例1.1: 動物列表瀏覽流程
 
-actor "使用者\n(訪客/會員)" as User
+actor "所有使用者" as User
 participant "Animals.vue" as AnimalsPage
 participant "animals.ts" as AnimalAPI
 participant "animals.py(blueprint)" as AnimalBlueprint
 participant "animal_service.py" as AnimalService
+participant "animal.py(model)" as AnimalModel
 database "MySQL" as DB
 participant "MinIO" as Storage
 
 == 1. 進入動物瀏覽頁面 ==
 User -> AnimalsPage: 訪問「/animals」路由
 activate AnimalsPage
-AnimalsPage -> AnimalsPage: 初始化篩選條件\n(filters = 預設值)
+AnimalsPage -> AnimalsPage: onMounted()\n初始化篩選條件\n(filters = 預設值)
 AnimalsPage -> AnimalsPage: 檢查用戶登入狀態\n(authStore.user)
+note right
+  預設篩選條件:
+  - page = 1
+  - per_page = 12
+  - status = PUBLISHED (隱含)
+end note
 
 == 2. 載入動物列表 ==
-AnimalsPage -> AnimalAPI: listAnimals(filters)
+AnimalsPage -> AnimalAPI: getAnimals(filters)
 activate AnimalAPI
-AnimalAPI -> AnimalBlueprint: GET /animals\n?page=1&per_page=20
+note right
+  filters 可能包含:
+  - species (物種: CAT/DOG)
+  - sex (性別: MALE/FEMALE)
+  - region (地區/縣市)
+  - source_type (來源: shelter/personal)
+  - min_age, max_age (年齡範圍，月數)
+  - q (關鍵字搜尋)
+  - page, per_page (分頁)
+end note
+AnimalAPI -> AnimalBlueprint: GET /animals\n?page=1&per_page=12
 activate AnimalBlueprint
-AnimalBlueprint -> AnimalBlueprint: 檢查 JWT Token (可選)
-AnimalBlueprint -> AnimalBlueprint: 收集篩選參數\n(species, sex, status, region等)
-AnimalBlueprint -> AnimalService: list_animals(filters, user_id)
+AnimalBlueprint -> AnimalBlueprint: 檢查 JWT Token (可選)\nverify_jwt_in_request(optional=True)
+AnimalBlueprint -> AnimalBlueprint: 收集查詢參數\n(species, sex, status, region,\nsource_type, min_age, max_age, q等)
+AnimalBlueprint -> AnimalService: list_animals(filters, current_user_id)
 activate AnimalService
 
-AnimalService -> AnimalService: 建立查詢基礎\n(status = PUBLISHED)
-AnimalService -> AnimalService: 套用篩選條件\n(物種、性別、地區等)
-AnimalService -> AnimalService: 排序(最新上架優先)
-AnimalService -> DB: SELECT animals\nWHERE status='PUBLISHED'\nLIMIT per_page OFFSET offset
-activate DB
-DB --> AnimalService: animals[]
-deactivate DB
+== 3. 建立查詢條件 ==
+AnimalService -> AnimalService: 取得分頁參數\npage, per_page
+AnimalService -> AnimalService: 建立查詢基礎\nquery = Animal.query.filter_by(deleted_at=None)
+note right
+  預設只顯示已發布動物:
+  - 若無 status 參數
+  - 自動設定 status = PUBLISHED
+end note
 
-AnimalService -> AnimalService: 載入關聯資料\n(images, shelter, owner)
-AnimalService -> DB: 批次載入圖片\nSELECT * FROM animal_images
-activate DB
-DB --> AnimalService: images[]
-deactivate DB
+AnimalService -> AnimalService: 套用狀態篩選\nWHERE status='PUBLISHED'
 
-AnimalService -> AnimalService: 組裝分頁資訊\n(total, pages, current_page)
-AnimalService --> AnimalBlueprint: {animals[], pagination}
+alt 有物種篩選
+    AnimalService -> AnimalService: 套用物種條件\nAND species=:species
+end
+
+alt 有性別篩選
+    AnimalService -> AnimalService: 套用性別條件\nAND sex=:sex
+end
+
+alt 有地區篩選
+    AnimalService -> AnimalService: 套用地區條件\n(查詢 shelter.region 或 owner.region)
+end
+
+alt 有年齡範圍篩選
+    AnimalService -> AnimalService: 計算年齡範圍\n使用出生日期反推
+    note right
+      資料庫實作:
+      - MySQL: TIMESTAMPDIFF(MONTH, dob, CURDATE())
+      - SQLite: julianday('now') - julianday(dob) / 30.44
+    end note
+    AnimalService -> AnimalService: 套用年齡條件\nAND age_in_months BETWEEN :min AND :max
+end
+
+alt 有關鍵字搜尋
+    AnimalService -> AnimalService: 套用關鍵字搜尋\n(name, breed, description)
+    note right
+      搜尋範圍:
+      - animal.name LIKE '%q%'
+      - animal.breed LIKE '%q%'
+      - animal.description LIKE '%q%'
+    end note
+end
+
+AnimalService -> AnimalService: 套用排序\nORDER BY created_at DESC\n(最新上架優先)
+AnimalService -> AnimalService: 套用分頁\nLIMIT per_page OFFSET offset
+
+== 4. 執行查詢 ==
+AnimalService -> AnimalModel: query.paginate(page, per_page)
+activate AnimalModel
+AnimalModel -> DB: 執行 SQL 查詢\nSELECT * FROM animals\nWHERE status='PUBLISHED'\nAND deleted_at IS NULL\nORDER BY created_at DESC\nLIMIT 12 OFFSET 0
+activate DB
+DB --> AnimalModel: animals[] + 總筆數
+deactivate DB
+AnimalModel --> AnimalService: pagination 物件
+deactivate AnimalModel
+
+== 5. 載入關聯資料 ==
+AnimalService -> AnimalService: 批次載入關聯資料\n(避免 N+1 查詢問題)
+
+AnimalService -> AnimalModel: 載入圖片關聯\n(images relationship)
+activate AnimalModel
+AnimalModel -> DB: SELECT * FROM attachments\nWHERE animal_id IN (...)\nAND type='IMAGE'\nORDER BY display_order
+activate DB
+DB --> AnimalModel: images[]
+deactivate DB
+AnimalModel --> AnimalService: 圖片列表
+deactivate AnimalModel
+
+AnimalService -> AnimalModel: 載入送養者資訊\n(shelter/owner relationship)
+activate AnimalModel
+AnimalModel -> DB: SELECT * FROM shelters\nWHERE shelter_id IN (...)
+activate DB
+DB --> AnimalModel: shelters[]
+deactivate DB
+AnimalModel -> DB: SELECT * FROM users\nWHERE user_id IN (...)
+activate DB
+DB --> AnimalModel: users[]
+deactivate DB
+AnimalModel --> AnimalService: 送養者資訊
+deactivate AnimalModel
+
+== 6. 檢查待審核申請 ==
+loop 每個動物
+    AnimalService -> AnimalModel: animal.has_pending_application()
+    activate AnimalModel
+    AnimalModel -> DB: SELECT * FROM applications\nWHERE animal_id = :id\nAND status IN ('PENDING', 'UNDER_REVIEW')\nLIMIT 1
+    activate DB
+    DB --> AnimalModel: 是否有待審核申請
+    deactivate DB
+    AnimalModel --> AnimalService: has_pending_application (boolean)
+    deactivate AnimalModel
+end
+
+== 7. 組裝回應資料 ==
+AnimalService -> AnimalService: 組裝分頁資訊\n{total, pages, current_page}
+AnimalService -> AnimalService: 呼叫 animal.to_dict(include_relations=True)
+note right
+  to_dict(include_relations=True) 包含:
+  - 動物基本資料 (animal_id, name, species, breed,
+    color, sex, dob, age, description, status)
+  - 圖片列表 (images[]: url, order, mime_type)
+  - 送養者資訊 (shelter/owner: name, region, contact)
+  - has_pending_application 標記 (boolean)
+  - featured 特色標記 (boolean)
+end note
+AnimalService --> AnimalBlueprint: {animals[], total, page, per_page, pages}
 deactivate AnimalService
 AnimalBlueprint --> AnimalAPI: 200 OK\n{animals[], pagination}
 deactivate AnimalBlueprint
 AnimalAPI --> AnimalsPage: {animals[], pagination}
 deactivate AnimalAPI
 
-== 3. 顯示動物卡片 ==
+== 8. 渲染動物列表 ==
+AnimalsPage -> AnimalsPage: animals = response.animals
+AnimalsPage -> AnimalsPage: totalPages = response.pages
 AnimalsPage -> AnimalsPage: 渲染動物卡片列表
 loop 每個動物
-    AnimalsPage -> AnimalsPage: 顯示圖片、名稱\n物種、年齡、性別
-    AnimalsPage -> Storage: 透過 CDN 載入圖片\n(image.url)
+    AnimalsPage -> AnimalsPage: 顯示動物資訊:\n- 名稱、物種、性別\n- 年齡、品種、描述
+    AnimalsPage -> Storage: 透過 CDN 載入圖片\nGET image.url
+    activate Storage
     Storage --> AnimalsPage: 圖片資料
+    deactivate Storage
+    
+    alt 動物有待審核申請
+        AnimalsPage -> AnimalsPage: 顯示「有申請中」標記
+    end
 end
 
-AnimalsPage --> User: 顯示動物列表\n(20筆/頁)
+AnimalsPage -> AnimalsPage: 顯示分頁控制項\n(上一頁、頁碼、下一頁)
+AnimalsPage --> User: 顯示動物列表\n(預設12筆/頁)
 deactivate AnimalsPage
 
-== 4. 使用者互動操作 ==
+== 9. 使用者互動操作 ==
 alt 點選動物卡片
     User -> AnimalsPage: 點選動物卡片
-    AnimalsPage -> User: 導航至動物詳情頁\n(router.push)
-else 點選分頁
-    User -> AnimalsPage: 點選下一頁
-    AnimalsPage -> AnimalsPage: 更新 page 參數
-    AnimalsPage -> AnimalAPI: 重新載入動物列表
-else 點選加入關注 (需登入)
-    User -> AnimalsPage: 點選「關注」按鈕
-    AnimalsPage -> AnimalsPage: 檢查登入狀態
+    activate AnimalsPage
+    AnimalsPage -> AnimalsPage: router.push('/animals/:id')
+    AnimalsPage --> User: 導航至動物詳情頁
     note right
-      未實現關注功能
-      顯示「即將推出」提示
+      進入使用案例 1.3
+      動物詳情檢視
     end note
+    deactivate AnimalsPage
+else 點選分頁按鈕
+    User -> AnimalsPage: 點選下一頁/頁碼
+    activate AnimalsPage
+    AnimalsPage -> AnimalsPage: 更新 filters.page
+    AnimalsPage -> AnimalAPI: 重新載入動物列表\ngetAnimals(filters)
+    note right: 回到步驟 2
+    deactivate AnimalsPage
+else 修改篩選條件
+    User -> AnimalsPage: 修改篩選條件\n(物種、性別、地區等)
+    activate AnimalsPage
+    AnimalsPage -> AnimalsPage: 觸發 @change 事件
+    AnimalsPage -> AnimalsPage: handleSearch()\n重設 page = 1
+    AnimalsPage -> AnimalAPI: 重新載入動物列表
+    note right
+      進入使用案例 1.2
+      動物搜尋篩選
+    end note
+    deactivate AnimalsPage
+else 輸入關鍵字搜尋
+    User -> AnimalsPage: 輸入關鍵字並按 Enter
+    activate AnimalsPage
+    AnimalsPage -> AnimalsPage: handleSearch()
+    AnimalsPage -> AnimalAPI: getAnimals({ q: keyword })
+    note right
+      進入使用案例 1.2
+      動物搜尋篩選
+    end note
+    deactivate AnimalsPage
 end
 
 note over User, DB
   **後置條件:**
   1. 動物列表已載入並顯示
   2. 僅顯示 status = PUBLISHED 的動物
-  3. 支援分頁瀏覽
+  3. 支援分頁瀏覽(12筆/頁，最大100筆/頁)
   4. 圖片透過 CDN 快速載入
+  5. 顯示動物基本資訊與圖片
+  6. 支援多維度篩選(物種、性別、地區、來源、年齡、關鍵字)
+  
+  **效能優化:**
+  - 使用 pagination 避免載入過多資料
+  - 批次載入關聯資料避免 N+1 問題
+  - 圖片使用 CDN 加速載入
+  - 前端快取查詢結果
+  
+  **資料結構:**
+  - Animal Model: ORM 物件對應資料庫表
+  - Service 層處理業務邏輯
+  - Blueprint 層處理 HTTP 請求
+  - 使用 to_dict() 序列化資料
+  
+  **權限控制:**
+  - 無需登入即可瀏覽
+  - JWT Token 為可選(optional=True)
+  - 訪客與會員看到相同列表
 end note
 
 @enduml

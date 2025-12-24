@@ -1,0 +1,238 @@
+@startuml 使用案例7_1_使用者註冊
+title 使用案例7.1: 使用者註冊流程
+
+actor "訪客" as Guest
+participant "Register.vue" as RegisterPage
+participant "auth.ts(store)" as AuthStore
+participant "client.ts(axios)" as APIClient
+participant "auth.py(blueprint)" as AuthBlueprint
+participant "auth_service.py" as AuthService
+participant "PendingRegistration(model)" as PendingModel
+participant "User(model)" as UserModel
+participant "email_service.py" as EmailService
+database "MySQL" as DB
+
+== 1. 進入註冊頁面 ==
+Guest -> RegisterPage: 點選「註冊」按鈕\n訪問「/register」路由
+activate RegisterPage
+RegisterPage -> RegisterPage: 初始化表單\nform = reactive({})
+note right
+  表單欄位:
+  - email (必填)
+  - password (必填)
+  - confirmPassword (必填)
+  - username (必填)
+  - first_name (必填)
+  - last_name (必填)
+  - phone_number (必填)
+  - region (必填)
+  - role (必填, 預設: GENERAL_MEMBER)
+end note
+RegisterPage --> Guest: 顯示註冊表單
+deactivate RegisterPage
+
+== 2. 填寫註冊資料 ==
+Guest -> RegisterPage: 輸入註冊資料
+activate RegisterPage
+note right
+  訪客填寫:
+  - Email 地址
+  - 密碼 (至少8字元，含英文與數字)
+  - 確認密碼
+  - 使用者名稱
+  - 名字、姓氏
+  - 電話號碼
+  - 選擇地區
+  - 選擇帳號類型 (個人/收容所)
+end note
+RegisterPage -> RegisterPage: v-model 雙向綁定\n更新 form.* 資料
+RegisterPage --> Guest: 顯示輸入內容
+deactivate RegisterPage
+
+== 3. 提交註冊表單 ==
+Guest -> RegisterPage: 點擊「註冊」按鈕
+activate RegisterPage
+RegisterPage -> RegisterPage: handleRegister()\n@submit.prevent
+RegisterPage -> RegisterPage: validateForm()\n驗證所有欄位
+note right
+  前端驗證項目:
+  1. Email 格式檢查
+  2. 密碼強度檢查 (8+ chars, letters + numbers)
+  3. 兩次密碼一致性
+  4. 必填欄位檢查
+  5. 電話號碼格式
+end note
+
+alt 驗證失敗
+    RegisterPage -> RegisterPage: errors.* = 錯誤訊息
+    RegisterPage --> Guest: 顯示錯誤提示\n(紅框 + 錯誤文字)
+    note left
+      常見錯誤:
+      - "請輸入有效的 Email 地址"
+      - "密碼至少 8 個字元，需包含英文和數字"
+      - "密碼不一致"
+      - "請選擇地區"
+    end note
+else 驗證通過
+    RegisterPage -> RegisterPage: isLoading = true\n禁用按鈕
+    RegisterPage -> RegisterPage: 組裝 registerData
+    note right
+      registerData = {
+        email, password,
+        username, first_name, last_name,
+        phone_number, region, role
+      }
+    end note
+end
+
+== 4. 呼叫 API 註冊 ==
+RegisterPage -> AuthStore: authStore.register(registerData)
+activate AuthStore
+AuthStore -> APIClient: api.post('/auth/register', data)
+activate APIClient
+APIClient -> APIClient: 添加 baseURL\n+ JWT Token (若有)
+APIClient -> AuthBlueprint: POST /auth/register\nContent-Type: application/json
+activate AuthBlueprint
+
+== 5. 後端驗證 ==
+AuthBlueprint -> AuthBlueprint: 取得 request.json
+AuthBlueprint -> AuthBlueprint: 檢查必填欄位\n['email', 'password']
+alt 缺少必填欄位
+    AuthBlueprint --> APIClient: 400 Bad Request\n{"message": "缺少必填欄位"}
+    APIClient --> AuthStore: error (400)
+    AuthStore --> RegisterPage: error
+    RegisterPage -> RegisterPage: errorMessage = "缺少必填欄位"
+    RegisterPage --> Guest: 顯示錯誤訊息
+    note left: 中斷流程
+else 欄位齊全
+    AuthBlueprint -> AuthBlueprint: 取得可選欄位\n(username, phone_number, region, role)
+    AuthBlueprint -> AuthBlueprint: 取得客戶端資訊\n(client_ip, user_agent)
+end
+
+== 6. 建立待註冊記錄 ==
+AuthBlueprint -> AuthService: register_pending(\nemail, password, username,\nphone_number, region, address,\nclient_ip, user_agent)
+activate AuthService
+
+AuthService -> UserModel: User.query.filter_by(email=email).first()
+activate UserModel
+UserModel -> DB: SELECT * FROM users\nWHERE email=:email\nLIMIT 1
+activate DB
+DB --> UserModel: User 或 None
+deactivate DB
+UserModel --> AuthService: existing_user
+deactivate UserModel
+
+alt Email 已被註冊
+    AuthService --> AuthBlueprint: raise ConflictError\n("此 email 已被註冊")
+    AuthBlueprint --> APIClient: 409 Conflict\n{"message": "此 email 已被註冊"}
+    APIClient --> AuthStore: error (409)
+    AuthStore --> RegisterPage: error
+    RegisterPage -> RegisterPage: errorMessage = "此 Email 已被註冊"
+    RegisterPage --> Guest: 顯示錯誤訊息\n(紅色提示框)
+    note left: 中斷流程
+else Email 未被註冊
+    AuthService -> PendingModel: PendingRegistration.query.filter_by(email).first()
+    activate PendingModel
+    PendingModel -> DB: SELECT * FROM pending_registrations\nWHERE email=:email\nLIMIT 1
+    activate DB
+    DB --> PendingModel: PendingRegistration 或 None
+    deactivate DB
+    PendingModel --> AuthService: existing_pending
+    deactivate PendingModel
+    
+    alt 已有未過期的待註冊記錄
+        AuthService --> AuthBlueprint: return existing_pending\n(重用現有記錄)
+        note right: 避免重複發送驗證碼
+    else 無待註冊記錄
+        AuthService -> AuthService: hash_password(password)\n→ password_hash
+        AuthService -> AuthService: generate_numeric_code(6)\n→ 驗證碼 (6位數字)
+        AuthService -> AuthService: hash_verification_code(code)\n→ code_hash
+        AuthService -> AuthService: expires = now + 15分鐘
+        
+        AuthService -> PendingModel: pending = PendingRegistration(\nemail, username, phone_number,\nregion, password_hash,\ncode_hash, expires, client_ip, user_agent)
+        activate PendingModel
+        PendingModel -> DB: INSERT INTO pending_registrations\nVALUES (...)
+        activate DB
+        DB --> PendingModel: pending_id (auto_increment)
+        deactivate DB
+        PendingModel --> AuthService: pending
+        deactivate PendingModel
+        
+        AuthService -> DB: db.session.commit()
+        activate DB
+        DB --> AuthService: 提交成功
+        deactivate DB
+    end
+end
+
+== 7. 發送驗證碼郵件 ==
+AuthService -> EmailService: send_registration_code_email(\nuser_email=email,\nusername=username,\ncode=code,\nexpires_minutes=15)
+activate EmailService
+EmailService -> EmailService: 組裝郵件內容
+note right
+  郵件主旨: "[App] 註冊驗證碼"
+  郵件內容:
+  "您的註冊驗證碼為： {code}
+  此驗證碼於 15 分鐘後失效。
+  如非您本人操作，請忽略本信。"
+end note
+
+EmailService -> EmailService: _send_via_smtp(\nsubject, to_email, body)
+
+alt SMTP 已配置
+    EmailService -> EmailService: 讀取 SMTP 設定\n(host, port, user, password)
+    EmailService -> EmailService: 建立 EmailMessage
+    EmailService -> EmailService: smtplib.SMTP(host, port)\n.starttls().login()
+    EmailService --> EmailService: server.send_message(msg)
+    note right: 實際發送郵件至 Email
+else SMTP 未配置 (開發模式)
+    EmailService -> EmailService: logger.warning()\nprint(body)
+    note right: 將驗證碼印在後端 console
+end
+
+EmailService --> AuthService: 發送成功 (True)
+deactivate EmailService
+
+AuthService --> AuthBlueprint: return pending
+deactivate AuthService
+
+== 8. 回傳註冊結果 ==
+AuthBlueprint -> AuthBlueprint: 遮蔽 Email\nmasked = local[:3] + '***@' + domain
+note right
+  範例:
+  abc@example.com → abc***@example.com
+  test123@gmail.com → tes***@gmail.com
+end note
+
+AuthBlueprint --> APIClient: 200 OK\n{\n  "message": "驗證碼已發送至電子郵件",\n  "pending_id": pending.pending_id,\n  "masked_email": "a***@example.com",\n  "expires_in": 900 (15分鐘)\n}
+deactivate AuthBlueprint
+APIClient --> AuthStore: response.data
+deactivate APIClient
+AuthStore --> RegisterPage: resp = {\npending_id, masked_email, expires_in\n}
+deactivate AuthStore
+
+== 9. 導向驗證頁面 ==
+RegisterPage -> RegisterPage: console.log('register response:', resp)
+RegisterPage -> RegisterPage: 取得 pending_id, masked_email
+RegisterPage -> RegisterPage: router.push({\nname: 'VerifyRegistration',\nquery: { pending_id, masked, role }\n})
+RegisterPage --> Guest: 導向 /verify-registration?pending_id=xxx
+note right
+  導向驗證頁面，並帶上:
+  - pending_id (待註冊記錄 ID)
+  - masked (遮蔽後的 Email)
+  - role (帳號類型)
+end note
+deactivate RegisterPage
+
+Guest -> Guest: 前往 Email 信箱\n查看驗證碼
+note left
+  下一步:
+  訪客在驗證頁面輸入
+  收到的 6 位數驗證碼
+  完成註冊
+  
+  參考: 使用案例 7.1.1
+  (Email 驗證)
+end note
+
+@enduml

@@ -1,20 +1,522 @@
-@startuml  
-title Use Case 2.2: My Rehomes Management
-actor User
-participant MyRehomes.vue
-participant animals.ts
-participant animals.py
-participant animal_service.py
-database MySQL
+@startuml 使用案例2_2_個人送養管理
+title 使用案例2.2: 個人送養管理流程
 
-User -> MyRehomes.vue: Visit /my-rehomes
-MyRehomes.vue -> animals.ts: listAnimals(owner_id)
-animals.ts -> animals.py: GET /animals?owner_id=X
-animals.py -> animal_service.py: list_animals()
-animal_service.py -> MySQL: SELECT animals WHERE owner_id
-MySQL --> animal_service.py: animals[]
-animal_service.py --> animals.py: result
-animals.py --> animals.ts: 200 OK
-animals.ts --> MyRehomes.vue: animals
-MyRehomes.vue --> User: Display list
+actor "一般會員" as User
+participant "MyRehomes.vue" as MyRehomesPage
+participant "animals.ts" as AnimalAPI
+participant "applications.ts" as ApplicationAPI
+participant "animals.py(blueprint)" as AnimalBlueprint
+participant "applications.py(blueprint)" as ApplicationBlueprint
+participant "animal_service.py" as AnimalService
+participant "application_service.py" as ApplicationService
+participant "animal.py(model)" as AnimalModel
+participant "others.py(Attachment)(model)" as AttachmentModel
+participant "user.py(model)" as UserModel
+participant "shelter.py(model)" as ShelterModel
+database "MySQL" as DB
+
+== 1. 進入我的送養頁面 ==
+User -> MyRehomesPage: 訪問 /my-rehomes
+activate MyRehomesPage
+
+MyRehomesPage -> MyRehomesPage: 檢查使用者認證狀態
+alt 使用者未登入
+    MyRehomesPage -> MyRehomesPage: router.push('/login')
+    MyRehomesPage --> User: 導向登入頁
+    deactivate MyRehomesPage
+end
+
+MyRehomesPage -> MyRehomesPage: onMounted()\n呼叫 fetchAnimals()
+
+== 2. 載入送養列表 ==
+MyRehomesPage -> AnimalAPI: getAnimals({ owner_id: user_id })
+activate AnimalAPI
+note right
+  API 參數:
+  owner_id = 當前使用者 ID
+  
+  僅載入自己的送養動物
+end note
+AnimalAPI -> AnimalBlueprint: GET /animals?owner_id={user_id}
+activate AnimalBlueprint
+
+AnimalBlueprint -> AnimalService: list_animals(filters, current_user_id)
+activate AnimalService
+
+== 3. 權限判斷與資料查詢 ==
+AnimalService -> AnimalService: 檢查 owner_id 參數\nif owner_id == current_user_id
+
+AnimalService -> UserModel: User.query.get(current_user_id)
+activate UserModel
+UserModel -> DB: SELECT * FROM users\nWHERE user_id = :id
+activate DB
+DB --> UserModel: 使用者資料
+deactivate DB
+UserModel --> AnimalService: User 物件
+deactivate UserModel
+
+alt owner_id 存在且 == current_user_id (查詢自己的動物)
+    alt 使用者為收容所成員且有 primary_shelter_id
+        AnimalService -> AnimalService: 建立查詢條件:\nor_(owner_id = :user_id,\n    shelter_id = :primary_shelter_id)
+        note right
+          收容所成員特殊權限:
+          - 個人動物 (owner_id = user_id)
+          - 收容所動物 (shelter_id = primary_shelter_id)
+          - 包含所有狀態
+        end note
+    else 一般使用者
+        AnimalService -> AnimalService: 建立查詢條件:\nowner_id = :user_id
+        note right
+          一般會員權限:
+          - 只查詢個人動物
+          - 包含所有狀態
+        end note
+    end
+else owner_id 不存在 (預設查詢)
+    AnimalService -> AnimalService: 預設 status = PUBLISHED
+    note right
+      未指定 owner_id:
+      只顯示已發布動物
+    end note
+end
+
+AnimalService -> AnimalModel: Animal.query.filter_by(\ndeleted_at=None).filter(條件)\n.order_by(created_at.desc())
+activate AnimalModel
+AnimalModel -> DB: SELECT * FROM animals\nWHERE (owner_id = :user_id\n  OR shelter_id = :shelter_id)\nAND deleted_at IS NULL\nORDER BY created_at DESC
+activate DB
+note right
+  查詢所有狀態:
+  - DRAFT (草稿)
+  - SUBMITTED (審核中)
+  - PUBLISHED (已發布)
+  - RETIRED (已下架)
+  - ADOPTED (已領養)
+end note
+DB --> AnimalModel: 動物記錄列表
+deactivate DB
+AnimalModel --> AnimalService: List[Animal]
+deactivate AnimalModel
+
+AnimalService -> AttachmentModel: 批次載入關聯圖片 (relationship)
+activate AttachmentModel
+AttachmentModel -> DB: SELECT * FROM attachments\nWHERE owner_type = 'animal'\nAND owner_id IN (:animal_ids)\nORDER BY display_order
+activate DB
+DB --> AttachmentModel: 圖片資料
+deactivate DB
+AttachmentModel --> AnimalService: images[]
+deactivate AttachmentModel
+
+AnimalService -> AnimalService: 組裝結果\n包含 has_pending_application 標記
+AnimalService --> AnimalBlueprint: {animals[], total, pages}
+deactivate AnimalService
+
+AnimalBlueprint --> AnimalAPI: 200 OK
+deactivate AnimalBlueprint
+AnimalAPI --> MyRehomesPage: 送養列表資料
+deactivate AnimalAPI
+
+== 4. 顯示列表與狀態篩選 ==
+MyRehomesPage -> MyRehomesPage: animals = response.animals
+note right
+  重要機制:
+  API **不傳 status 參數**
+  一次性載入所有狀態數據
+  (DRAFT/SUBMITTED/PUBLISHED/RETIRED)
+  
+  狀態篩選在**前端**執行:
+  filteredAnimals = computed(() => {
+    if (!currentStatus) return animals
+    return animals.filter(a => a.status === currentStatus)
+  })
+end note
+
+MyRehomesPage -> MyRehomesPage: 顯示狀態篩選按鈕\n(全部/草稿/審核中/已發布/已下架)
+MyRehomesPage --> User: 顯示送養列表
+
+opt 收容所會員提示
+    alt 使用者角色為 SHELTER_MEMBER
+        MyRehomesPage -> MyRehomesPage: 顯示提示框
+        MyRehomesPage --> User: 提示「前往收容所動物管理」
+    end
+end
+deactivate MyRehomesPage
+
+== 5. 替代流程 - 狀態篩選 ==
+opt 使用者篩選狀態
+    User -> MyRehomesPage: 點選狀態篩選按鈕
+    activate MyRehomesPage
+    MyRehomesPage -> MyRehomesPage: currentStatus = '選擇的狀態'
+    MyRehomesPage -> MyRehomesPage: 前端過濾列表\nfilteredAnimals = animals.filter(status)
+    MyRehomesPage --> User: 顯示篩選後列表
+    deactivate MyRehomesPage
+end
+
+== 6. 替代流程 - 編輯送養 ==
+opt 使用者編輯送養
+    User -> MyRehomesPage: 點擊「編輯」按鈕\n(僅草稿和審核中狀態)
+    activate MyRehomesPage
+    MyRehomesPage -> MyRehomesPage: editAnimal(animal_id)
+    MyRehomesPage -> MyRehomesPage: router.push('/rehome-form?id={id}')
+    MyRehomesPage --> User: 導向編輯表單頁面
+    note right
+      進入使用案例 2.1
+      個人送養發佈(編輯模式)
+    end note
+    deactivate MyRehomesPage
+end
+
+== 7. 替代流程 - 提交審核 ==
+opt 使用者提交審核
+    User -> MyRehomesPage: 點擊「提交審核」按鈕\n(僅草稿狀態)
+    activate MyRehomesPage
+    MyRehomesPage -> MyRehomesPage: confirmSubmit(animal_id)
+    MyRehomesPage --> User: 彈出確認對話框\n「確定要提交審核嗎?」
+    
+    alt 使用者確認
+        User -> MyRehomesPage: 點擊確認
+        MyRehomesPage -> AnimalAPI: submitAnimal(animal_id)
+        activate AnimalAPI
+        AnimalAPI -> AnimalBlueprint: POST /animals/{id}/submit
+        activate AnimalBlueprint
+        
+        AnimalBlueprint -> AnimalService: submit_for_review(animal_id, user)
+        activate AnimalService
+        
+        AnimalService -> AnimalModel: Animal.query.filter_by(\nanimal_id=:id, deleted_at=None).first()
+        activate AnimalModel
+        AnimalModel -> DB: SELECT * FROM animals\nWHERE animal_id = :id\nAND deleted_at IS NULL
+        activate DB
+        DB --> AnimalModel: 動物資料
+        deactivate DB
+        AnimalModel --> AnimalService: Animal 物件
+        deactivate AnimalModel
+        
+        AnimalService -> AnimalService: 檢查權限\npermission_service.can_submit_animal_for_review()
+        AnimalService -> AnimalService: 檢查狀態 (status == DRAFT)
+        alt 狀態非 DRAFT
+            AnimalService --> AnimalBlueprint: ValidationError:\n「只能提交草稿狀態的動物,目前狀態: {status}」
+            AnimalBlueprint --> AnimalAPI: 400 Bad Request
+            AnimalAPI --> MyRehomesPage: 錯誤訊息
+            MyRehomesPage --> User: alert('提交失敗')
+        else 狀態為 DRAFT
+            AnimalService -> AnimalService: animal.status = SUBMITTED
+            AnimalService -> AnimalModel: db.session.commit()
+            activate AnimalModel
+            AnimalModel -> DB: UPDATE animals\nSET status = 'SUBMITTED',\n    updated_at = NOW()\nWHERE animal_id = :id
+            activate DB
+            DB --> AnimalModel: 更新成功
+            deactivate DB
+            AnimalModel --> AnimalService: 提交成功
+            deactivate AnimalModel
+            
+            AnimalService --> AnimalBlueprint: 更新後動物資料
+            deactivate AnimalService
+            AnimalBlueprint --> AnimalAPI: 200 OK {animal}
+            deactivate AnimalBlueprint
+            AnimalAPI --> MyRehomesPage: 提交成功
+            deactivate AnimalAPI
+            
+            MyRehomesPage -> MyRehomesPage: 更新本地列表狀態
+            MyRehomesPage --> User: alert('已提交審核')
+        end
+    else 使用者取消
+        User -> MyRehomesPage: 點擊取消
+        MyRehomesPage --> User: 不執行任何操作
+    end
+    deactivate MyRehomesPage
+end
+
+== 8. 替代流程 - 查看申請列表 ==
+opt 使用者查看申請
+    User -> MyRehomesPage: 點擊「申請列表」按鈕\n(僅已發布狀態)
+    activate MyRehomesPage
+    MyRehomesPage -> MyRehomesPage: viewApplications(animal_id)
+    
+    alt 收容所會員或管理員
+        MyRehomesPage -> MyRehomesPage: router.push('/admin/applications?animal_id={id}')
+        MyRehomesPage --> User: 導向「申請審核」頁面
+        note right
+          進入使用案例 3.1
+          申請列表瀏覽
+          
+          可查看並審核此動物的所有申請
+        end note
+    else 一般會員
+        MyRehomesPage -> MyRehomesPage: router.push('/my/applications')
+        MyRehomesPage --> User: 導向「我的申請」頁面
+        note right
+          實際代碼跳轉有誤:
+          一般會員作為**送養者**
+          應該查看自己動物的申請列表
+          而非自己作為申請人的申請
+          
+          建議修正為獨立的
+          「送養申請管理」頁面
+        end note
+    end
+    deactivate MyRehomesPage
+end
+
+== 8.5 替代流程 - 下架動物 ==
+opt 使用者下架動物
+    User -> MyRehomesPage: 點擊「下架」按鈕\n(僅已發布狀態)
+    activate MyRehomesPage
+    
+    note right
+      ⚠️ 前端功能缺失:
+      實際代碼**沒有**下架按鈕
+      但後端有 retire_animal() 方法
+      
+      usecase 2.2 輔助說明第3點:
+      「下架後的送養資料可以重新發佈」
+    end note
+    
+    MyRehomesPage -> MyRehomesPage: confirmRetire(animal_id)
+    MyRehomesPage --> User: 彈出確認對話框\n「確定要下架此動物嗎?」
+    
+    alt 使用者確認
+        User -> MyRehomesPage: 點擊確認
+        MyRehomesPage -> AnimalAPI: retireAnimal(animal_id)
+        activate AnimalAPI
+        AnimalAPI -> AnimalBlueprint: POST /animals/{id}/retire
+        activate AnimalBlueprint
+        
+        AnimalBlueprint -> AnimalService: retire_animal(animal_id, user)
+        activate AnimalService
+        
+        AnimalService -> AnimalModel: Animal.query.filter_by(\nanimal_id=:id, deleted_at=None).first()
+        activate AnimalModel
+        AnimalModel -> DB: SELECT * FROM animals\nWHERE animal_id = :id\nAND deleted_at IS NULL
+        activate DB
+        DB --> AnimalModel: 動物資料
+        deactivate DB
+        AnimalModel --> AnimalService: Animal 物件
+        deactivate AnimalModel
+        
+        AnimalService -> AnimalService: 檢查權限\npermission_service.can_manage_animal()\n或 user.role == ADMIN
+        
+        AnimalService -> AnimalService: 檢查狀態\nif status == RETIRED: ValidationError
+        
+        AnimalService -> AnimalService: animal.status = RETIRED
+        AnimalService -> AnimalModel: db.session.commit()
+        activate AnimalModel
+        AnimalModel -> DB: UPDATE animals\nSET status = 'RETIRED',\n    updated_at = NOW()\nWHERE animal_id = :id
+        activate DB
+        note right
+          下架狀態:
+          - 不會顯示在公開清單
+          - 停止接受新申請
+          - 可以重新發布
+        end note
+        DB --> AnimalModel: 更新成功
+        deactivate DB
+        AnimalModel --> AnimalService: 提交成功
+        deactivate AnimalModel
+        
+        AnimalService --> AnimalBlueprint: 更新後動物資料
+        deactivate AnimalService
+        AnimalBlueprint --> AnimalAPI: 200 OK {animal}
+        deactivate AnimalBlueprint
+        AnimalAPI --> MyRehomesPage: 下架成功
+        deactivate AnimalAPI
+        
+        MyRehomesPage -> MyRehomesPage: 更新本地列表狀態
+        MyRehomesPage --> User: alert('已下架')
+    else 使用者取消
+        User -> MyRehomesPage: 點擊取消
+        MyRehomesPage --> User: 不執行任何操作
+    end
+    deactivate MyRehomesPage
+end
+
+== 8.6 替代流程 - 重新發布 ==
+opt 使用者重新發布
+    User -> MyRehomesPage: 點擊「重新發布」按鈕\n(僅已下架狀態)
+    activate MyRehomesPage
+    
+    note right
+      ⚠️ 功能未實現:
+      前端和後端都沒有重新發布功能
+      
+      usecase 2.2 輔助說明第3點:
+      「下架後的送養資料可以重新發佈」
+      
+      可能實現方式:
+      1. 使用 submit_for_review() 重新提交審核
+      2. 或新增 republish() 方法直接發布
+         (需管理員權限或自動審核通過)
+    end note
+    
+    MyRehomesPage --> User: 功能尚未實現
+    deactivate MyRehomesPage
+end
+
+== 9. 替代流程 - 管理圖片 ==
+opt 使用者管理圖片
+    User -> MyRehomesPage: 點擊「管理圖片」按鈕
+    activate MyRehomesPage
+    MyRehomesPage -> MyRehomesPage: manageImages(animal)
+    MyRehomesPage -> MyRehomesPage: 顯示圖片管理對話框
+    MyRehomesPage --> User: 顯示圖片列表
+    
+    opt 刪除圖片
+        User -> MyRehomesPage: 點擊刪除圖片按鈕
+        MyRehomesPage --> User: 彈出確認對話框
+        
+        alt 使用者確認
+            User -> MyRehomesPage: 確認刪除
+            MyRehomesPage -> AnimalAPI: deleteAnimalImage(animal_id, image_id)
+            activate AnimalAPI
+            AnimalAPI -> AnimalBlueprint: DELETE /animals/{id}/images/{image_id}
+            activate AnimalBlueprint
+            
+            AnimalBlueprint -> AnimalService: delete_image(animal_id, image_id, user)
+            activate AnimalService
+            
+            AnimalService -> AnimalService: 檢查動物權限
+            
+            AnimalService -> AttachmentModel: Attachment.query.filter_by(\nowner_type='animal',\nowner_id=:animal_id,\nattachment_id=:image_id).first()
+            activate AttachmentModel
+            AttachmentModel -> DB: SELECT * FROM attachments\nWHERE owner_type = 'animal'\nAND owner_id = :animal_id\nAND attachment_id = :image_id
+            activate DB
+            DB --> AttachmentModel: 圖片記錄
+            deactivate DB
+            AttachmentModel --> AnimalService: Attachment 物件
+            deactivate AttachmentModel
+            
+            AnimalService -> AttachmentModel: db.session.delete(attachment)
+            activate AttachmentModel
+            AttachmentModel -> DB: DELETE FROM attachments\nWHERE attachment_id = :image_id
+            activate DB
+            DB --> AttachmentModel: 刪除成功
+            deactivate DB
+            AttachmentModel --> AnimalService: 提交成功
+            deactivate AttachmentModel
+            
+            AnimalService --> AnimalBlueprint: 成功
+            deactivate AnimalService
+            AnimalBlueprint --> AnimalAPI: 200 OK
+            deactivate AnimalBlueprint
+            AnimalAPI --> MyRehomesPage: 刪除成功
+            deactivate AnimalAPI
+            
+            MyRehomesPage -> MyRehomesPage: 更新本地圖片列表
+            MyRehomesPage --> User: alert('圖片已刪除')
+        end
+    end
+    
+    User -> MyRehomesPage: 關閉對話框
+    MyRehomesPage -> MyRehomesPage: closeImageModal()
+    MyRehomesPage --> User: 返回送養列表
+    deactivate MyRehomesPage
+end
+
+== 10. 替代流程 - 刪除送養 ==
+opt 使用者刪除送養
+    User -> MyRehomesPage: 點擊「刪除」按鈕
+    activate MyRehomesPage
+    MyRehomesPage -> MyRehomesPage: confirmDelete(animal_id)
+    MyRehomesPage --> User: 彈出確認對話框\n「確定要刪除此送養資訊嗎?」
+    
+    alt 使用者確認
+        User -> MyRehomesPage: 點擊確認
+        MyRehomesPage -> AnimalAPI: deleteAnimal(animal_id)
+        activate AnimalAPI
+        AnimalAPI -> AnimalBlueprint: DELETE /animals/{id}
+        activate AnimalBlueprint
+        
+        AnimalBlueprint -> AnimalService: delete_animal(animal_id, user)
+        activate AnimalService
+        
+        AnimalService -> AnimalModel: Animal.query.filter_by(\nanimal_id=:id, deleted_at=None).first()
+        activate AnimalModel
+        AnimalModel -> DB: SELECT * FROM animals\nWHERE animal_id = :id\nAND deleted_at IS NULL
+        activate DB
+        DB --> AnimalModel: 動物資料
+        deactivate DB
+        AnimalModel --> AnimalService: Animal 物件
+        deactivate AnimalModel
+        
+        AnimalService -> AnimalService: 檢查權限\npermission_service.can_manage_animal()\n或 user.role == ADMIN
+        
+        AnimalService -> AnimalService: animal.deleted_at = NOW()
+        AnimalService -> AnimalModel: db.session.commit()
+        activate AnimalModel
+        AnimalModel -> DB: UPDATE animals\nSET deleted_at = NOW(),\n    updated_at = NOW()\nWHERE animal_id = :id
+        activate DB
+        note right
+          軟刪除機制:
+          不實際刪除記錄
+          僅設定 deleted_at 時間戳
+          保留歷史資料以備審計
+        end note
+        DB --> AnimalModel: 刪除成功
+        deactivate DB
+        AnimalModel --> AnimalService: 提交成功
+        deactivate AnimalModel
+        
+        AnimalService --> AnimalBlueprint: 成功
+        deactivate AnimalService
+        AnimalBlueprint --> AnimalAPI: 200 OK
+        deactivate AnimalBlueprint
+        AnimalAPI --> MyRehomesPage: 刪除成功
+        deactivate AnimalAPI
+        
+        MyRehomesPage -> MyRehomesPage: 從列表中移除該動物
+        MyRehomesPage --> User: alert('刪除成功')
+    else 使用者取消
+        User -> MyRehomesPage: 點擊取消
+        MyRehomesPage --> User: 不執行任何操作
+    end
+    deactivate MyRehomesPage
+end
+
+== 11. 替代流程 - 查看動物詳情 ==
+opt 使用者查看詳情
+    User -> MyRehomesPage: 點擊「查看」按鈕
+    activate MyRehomesPage
+    MyRehomesPage -> MyRehomesPage: router.push('/animals/{id}')
+    MyRehomesPage --> User: 導向動物詳情頁
+    note right
+      進入使用案例 1.3
+      動物詳情檢視
+    end note
+    deactivate MyRehomesPage
+end
+
+note over User, DB
+  **後置條件:**
+  1. 顯示使用者所有送養動物列表
+  2. 依狀態分類顯示(草稿/審核中/已發布/已下架)
+  3. 顯示每筆送養的統計資訊(瀏覽次數、圖片數量)
+  4. 根據狀態顯示對應操作按鈕
+  
+  **操作權限:**
+  - 草稿狀態: 可編輯、可提交審核、可刪除
+  - 審核中狀態: 可編輯、可刪除
+  - 已發布狀態: 可查看申請、可管理圖片、**可下架(未實現)**、可刪除
+  - 已下架狀態: 可刪除、**可重新發佈(未實現)**
+  
+  **特殊提示:**
+  - 收容所會員顯示「前往收容所動物管理」提示
+  - 有待審核申請時顯示警示標記
+  - 被拒絕的動物顯示拒絕原因
+  
+  **前端篩選機制:**
+  - 所有狀態篩選在前端執行
+  - API 不傳 status 參數,一次載入所有資料
+  - 使用 computed 屬性前端過濾
+  - 提升使用者體驗,減少 API 請求
+  
+  **資料保護:**
+  - 刪除採用軟刪除機制 (deleted_at)
+  - 保留歷史資料以備審計
+  - 只有擁有者可管理自己的送養
+  
+  **未實現功能 (usecase 2.2 提及):**
+  ⚠️ 下架功能: 後端有 retire_animal(),前端缺按鈕
+  ⚠️ 重新發布: 完全未實現
+  ⚠️ 一般會員查看送養申請列表: 跳轉邏輯有誤
+end note
+
 @enduml

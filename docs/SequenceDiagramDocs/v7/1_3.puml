@@ -1,22 +1,263 @@
-﻿@startuml
-title Use Case 1.3: Animal Detail View
+@startuml 使用案例1_3_動物詳情檢視
+title 使用案例1.3: 動物詳情檢視流程
 
-actor User
-participant AnimalDetail.vue
-participant animals.ts
-participant animals.py
-participant animal_service.py
-database MySQL
+actor "所有使用者" as User
+participant "AnimalDetail.vue" as DetailPage
+participant "animals.ts" as AnimalAPI
+participant "medicalRecords.ts" as MedicalAPI
+participant "animals.py(blueprint)" as AnimalBlueprint
+participant "medical_records.py(blueprint)" as MedicalBlueprint
+participant "animal_service.py" as AnimalService
+participant "medical_record_service.py" as MedicalService
+participant "animal.py(model)" as AnimalModel
+participant "medical_record.py(model)" as MedicalRecordModel
+participant "others.py(Attachment)(model)" as AttachmentModel
+participant "user.py(model)" as UserModel
+participant "shelter.py(model)" as ShelterModel
+database "MySQL" as DB
 
-User -> AnimalDetail.vue: Click animal card
-AnimalDetail.vue -> animals.ts: getAnimal(id)
-animals.ts -> animals.py: GET /animals/{id}
-animals.py -> animal_service.py: get_animal(id)
-animal_service.py -> MySQL: SELECT animal with images
-MySQL --> animal_service.py: animal data
-animal_service.py --> animals.py: animal dict
-animals.py --> animals.ts: 200 OK
-animals.ts --> AnimalDetail.vue: animal
-AnimalDetail.vue --> User: Display details
+== 1. 進入詳情頁面 ==
+User -> DetailPage: 從列表點擊動物卡片\nrouter.push(/animals/:id)
+activate DetailPage
+DetailPage -> DetailPage: onMounted()\n取得路由參數 animal_id
+DetailPage -> DetailPage: 呼叫 loadAnimal()
+note right
+  loadAnimal() 內部串行執行:
+  1. await getAnimal(id)
+  2. await loadMedicalRecords(id)
+  3. await loadSourceInfo()
+end note
+
+== 2. 載入動物完整資料 ==
+DetailPage -> AnimalAPI: getAnimal(animal_id)
+activate AnimalAPI
+AnimalAPI -> AnimalBlueprint: GET /animals/:id
+activate AnimalBlueprint
+
+AnimalBlueprint -> AnimalService: get_animal(animal_id)
+activate AnimalService
+
+AnimalService -> AnimalModel: Animal.query.filter_by(\nanimal_id=:id, deleted_at=None).first()
+activate AnimalModel
+AnimalModel -> DB: SELECT * FROM animals\nWHERE animal_id = :id\nAND deleted_at IS NULL
+activate DB
+DB --> AnimalModel: 動物基本資料
+deactivate DB
+AnimalModel --> AnimalService: Animal 物件
+deactivate AnimalModel
+
+AnimalService -> AnimalService: animal.to_dict(\ninclude_relations=True)
+note right
+  include_relations=True 觸發
+  SQLAlchemy relationship 載入:
+  - images (Attachment)
+  - owner (User)
+  - shelter (Shelter)
+end note
+
+AnimalService -> AttachmentModel: 載入關聯圖片 (relationship)
+activate AttachmentModel
+AttachmentModel -> DB: SELECT * FROM attachments\nWHERE owner_type = 'animal'\nAND owner_id = :id\nORDER BY display_order
+activate DB
+DB --> AttachmentModel: 圖片集
+deactivate DB
+AttachmentModel --> AnimalService: images[]
+deactivate AttachmentModel
+
+alt 個人送養 (owner_id 存在)
+    AnimalService -> UserModel: 載入送養者 (relationship)
+    activate UserModel
+    UserModel -> DB: SELECT * FROM users\nWHERE user_id = :owner_id
+    activate DB
+    DB --> UserModel: 一般會員資料\n(name, phone, region)
+    deactivate DB
+    UserModel --> AnimalService: owner
+    deactivate UserModel
+else 收容所送養 (shelter_id 存在)
+    AnimalService -> ShelterModel: 載入收容所 (relationship)
+    activate ShelterModel
+    ShelterModel -> DB: SELECT * FROM shelters\nWHERE shelter_id = :shelter_id
+    activate DB
+    DB --> ShelterModel: 收容所資料\n(name, address, contact)
+    deactivate DB
+    ShelterModel --> AnimalService: shelter
+    deactivate ShelterModel
+end
+
+AnimalService -> AnimalService: 組裝完整資料
+AnimalService --> AnimalBlueprint: 動物詳細資料 + 圖片 + 送養者
+deactivate AnimalService
+
+AnimalBlueprint --> AnimalAPI: 200 OK\n{animal, images[], shelter/owner}
+deactivate AnimalBlueprint
+AnimalAPI --> DetailPage: 動物完整資料
+deactivate AnimalAPI
+
+DetailPage -> DetailPage: loadSourceInfo()\n檢查關聯資料
+note right
+  前端優先處理邏輯:
+  1. 若 animal.shelter 已存在 → 直接使用
+  2. 若 animal.owner 已存在 → 直接使用
+  3. 若僅有 shelter_id/owner_id → 額外發起 API 請求
+  
+  這樣可避免重複查詢
+end note
+
+== 3. 載入醫療紀錄 (在 loadAnimal 內) ==
+DetailPage -> MedicalAPI: getMedicalRecords(animal_id)
+activate MedicalAPI
+note right
+  API 路徑:
+  GET /medical-records/animals/:id/medical-records
+end note
+MedicalAPI -> MedicalBlueprint: GET /medical-records/animals/:id/medical-records
+activate MedicalBlueprint
+
+MedicalBlueprint -> MedicalService: list_animal_medical_records(animal_id)
+activate MedicalService
+
+MedicalService -> AnimalModel: Animal.query.filter_by(\nanimal_id=:id, deleted_at=None).first()
+activate AnimalModel
+AnimalModel -> DB: SELECT * FROM animals\nWHERE animal_id = :id\nAND deleted_at IS NULL
+activate DB
+note right
+  檢查動物是否存在
+  若不存在則拋出 NotFoundError
+end note
+DB --> AnimalModel: 動物記錄 (驗證存在)
+deactivate DB
+AnimalModel --> MedicalService: Animal 物件
+deactivate AnimalModel
+
+MedicalService -> MedicalRecordModel: MedicalRecord.query.filter_by(\nanimal_id=:id, deleted_at=None)\n.order_by(date.desc()).all()
+activate MedicalRecordModel
+MedicalRecordModel -> DB: SELECT * FROM medical_records\nWHERE animal_id = :id\nAND deleted_at IS NULL\nORDER BY date DESC
+activate DB
+note right
+  ⚠️ 回傳**所有**醫療紀錄 (包含未驗證):
+  - 疫苗接種記錄 (VACCINE)
+  - 健康檢查記錄 (CHECKUP)
+  - 絕育手術記錄 (SURGERY)
+  - 治療記錄 (TREATMENT)
+  - 其他 (OTHER)
+  
+  前端顯示邏輯:
+  - 顯示所有記錄 (已驗證 ✓ / 未驗證 ⚠)
+  - 預設顯示前3筆
+  - 可展開查看全部
+  
+  注意: 與 usecase 1.3 規格不符
+  (規格要求僅顯示已驗證記錄)
+end note
+DB --> MedicalRecordModel: 醫療紀錄列表
+deactivate DB
+MedicalRecordModel --> MedicalService: List[MedicalRecord]
+deactivate MedicalRecordModel
+
+MedicalService --> MedicalBlueprint: 紀錄列表
+deactivate MedicalService
+MedicalBlueprint --> MedicalAPI: 200 OK {total, medical_records[]}
+deactivate MedicalBlueprint
+MedicalAPI --> DetailPage: 醫療紀錄列表
+deactivate MedicalAPI
+
+== 4. 渲染頁面 ==
+DetailPage -> DetailPage: 渲染動物資訊
+DetailPage -> DetailPage: 顯示圖片輪播/畫廊
+DetailPage -> DetailPage: 顯示基本資料\n(名稱、物種、性別、年齡等)
+DetailPage -> DetailPage: 顯示描述與特徵
+DetailPage -> DetailPage: 顯示送養者聯絡資訊
+DetailPage -> DetailPage: 顯示醫療紀錄摘要
+
+== 5. 判斷顯示選項 ==
+alt 動物已領養
+    DetailPage -> DetailPage: 顯示「已領養」標籤
+    DetailPage -> DetailPage: 隱藏「提出申請」按鈕
+    DetailPage --> User: 顯示已領養狀態
+else 動物可領養 && 使用者已登入
+    DetailPage -> DetailPage: 顯示「提出申請」按鈕
+    DetailPage --> User: 顯示可申請狀態
+else 動物可領養 && 使用者未登入
+    DetailPage -> DetailPage: 顯示「請先登入」提示
+    DetailPage --> User: 提示需登入
+end
+
+alt 送養者是當前使用者
+    DetailPage -> DetailPage: 顯示管理選項
+    DetailPage -> DetailPage: 顯示「編輯」「下架」按鈕
+    DetailPage --> User: 顯示管理介面
+end
+deactivate DetailPage
+
+== 6. 替代流程 - 圖片燈箱 ==
+opt 使用者點選圖片
+    User -> DetailPage: 點擊圖片
+    activate DetailPage
+    DetailPage -> DetailPage: 開啟圖片燈箱檢視器
+    DetailPage -> DetailPage: 顯示大圖 + 左右切換
+    DetailPage --> User: 顯示圖片燈箱
+    User -> DetailPage: 關閉燈箱
+    DetailPage -> DetailPage: 關閉燈箱
+    deactivate DetailPage
+end
+
+== 7. 替代流程 - 查看完整醫療紀錄 ==
+opt 使用者查看完整醫療紀錄
+    User -> DetailPage: 點擊「展開」查看更多
+    activate DetailPage
+    DetailPage -> DetailPage: showAllMedicalRecords = true
+    DetailPage -> DetailPage: 顯示所有醫療紀錄\n(而非只顯示前3筆)
+    DetailPage --> User: 顯示完整醫療紀錄列表
+    deactivate DetailPage
+end
+
+== 8. 替代流程 - 聯絡送養者 ==
+opt 使用者聯絡送養者
+    User -> DetailPage: 點擊「聯絡送養者」
+    activate DetailPage
+    alt 使用者已登入
+        DetailPage -> DetailPage: 顯示完整聯絡資訊\n(電話、email、地址)
+        DetailPage --> User: 顯示聯絡方式
+    else 使用者未登入
+        DetailPage --> User: 提示「請先登入」
+    end
+    deactivate DetailPage
+end
+
+== 9. 替代流程 - 提出領養申請 ==
+opt 使用者提出申請
+    User -> DetailPage: 點擊「提出申請」按鈕
+    activate DetailPage
+    DetailPage -> DetailPage: 導航到申請表單\nrouter.push(/applications/new?animal=:id)
+    DetailPage --> User: 前往申請頁面
+    note right
+      進入使用案例 1.4
+      領養申請提交
+    end note
+    deactivate DetailPage
+end
+
+note over User, DB
+  **後置條件:**
+  1. 顯示完整動物資訊(基本資料、圖片、描述)
+  2. 顯示送養者公開資訊(收容所或個人)
+  3. 顯示所有醫療紀錄(包含已驗證與未驗證，預設前3筆，可展開)
+  4. 根據狀態顯示對應操作按鈕
+  
+  **權限控制:**
+  - 訪客: 基本資訊 + 公開聯絡方式
+  - 會員: 完整資訊 + 申請功能
+  - 送養者: 管理功能(編輯、下架)
+  
+  **狀態判斷:**
+  - 已領養(ADOPTED): 不顯示申請按鈕
+  - 可領養(PUBLISHED): 顯示申請按鈕(需登入)
+  - 自己的送養: 顯示管理選項
+  
+  **資料載入:**
+  - 動物基本資料從 animals API
+  - 醫療紀錄從 medical-records API
+  - 圖片與關聯資料一併載入
+end note
 
 @enduml

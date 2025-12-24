@@ -1,0 +1,375 @@
+﻿@startuml 使用案例3_3: 申請審核通知
+title 使用案例3.3: 申請審核通知
+
+actor "申請者" as Applicant
+participant "NotificationCenter.vue" as NotificationPage
+participant "NotificationBell.vue" as NotificationBell
+participant "useNotifications.ts" as NotificationComposable
+participant "notifications.py(blueprint)" as NotificationBlueprint
+participant "notification_service.py" as NotificationService
+participant "email_tasks.py" as EmailTasks
+participant "email_service.py" as EmailService
+participant "others.py(Notification)(model)" as NotificationModel
+participant "user.py(model)" as UserModel
+participant "application.py(model)" as ApplicationModel
+participant "animal.py(model)" as AnimalModel
+participant "Celery Worker" as CeleryWorker
+database "MySQL" as DB
+
+== 1. 前置條件 ==
+note over Applicant, DB
+  前置條件:
+  - 申請者已提交領養申請 (Use Case 1.4)
+  - 送養者已完成審核 (Use Case 3.2)
+  - 審核結果為 APPROVED 或 REJECTED
+end note
+
+== 2. 審核完成後觸發通知 (由 3.2 觸發) ==
+note over NotificationService, DB
+  此階段由 Use Case 3.2 (申請審核作業) 觸發
+  review_application() 完成後自動執行
+end note
+== 2. 審核完成後觸發通知 (由 3.2 觸發) ==
+note over NotificationService, DB
+  此階段由 Use Case 3.2 (申請審核作業) 觸發
+  review_application() 完成後自動執行
+end note
+
+NotificationService -> NotificationService: notify_application_reviewed(application, reviewer_id, status, review_notes)
+activate NotificationService
+
+NotificationService -> AnimalModel: Animal.query.get(application.animal_id)
+activate AnimalModel
+AnimalModel -> DB: SELECT * FROM animals WHERE animal_id=?
+activate DB
+DB --> AnimalModel: animal 資料
+deactivate DB
+AnimalModel --> NotificationService: Animal 物件 (取得 animal_name)
+deactivate AnimalModel
+
+== 3. 建立系統內通知 ==
+NotificationService -> NotificationService: 決定通知類型
+note right
+  根據審核結果選擇:
+  - status == 'APPROVED'
+    → type = 'application_approved'
+  - status == 'REJECTED'
+    → type = 'application_rejected'
+  
+  payload 包含:
+  - application_id
+  - animal_id
+  - animal_name
+  - status
+  - review_notes
+end note
+
+NotificationService -> NotificationModel: 建立通知記錄
+activate NotificationModel
+NotificationModel -> DB: INSERT INTO notifications\\n(recipient_id, actor_id, type,\\npayload, read, created_at)\\nVALUES (applicant_id, reviewer_id, ?, ?, FALSE, NOW())
+activate DB
+note right
+  通知內容:
+  - recipient_id: 申請者 ID
+  - actor_id: 審核者 ID
+  - type: application_approved/rejected
+  - payload: JSON 包含動物和審核資訊
+  - read: FALSE (未讀)
+end note
+DB --> NotificationModel: notification_id
+deactivate DB
+NotificationModel --> NotificationService: Notification 物件
+deactivate NotificationModel
+
+== 4. 發送 Email 通知 (非同步) ==
+NotificationService -> UserModel: User.query.get(application.applicant_id)
+activate UserModel
+UserModel -> DB: SELECT * FROM users WHERE user_id=?
+activate DB
+DB --> UserModel: applicant 資料
+deactivate DB
+UserModel --> NotificationService: Applicant 物件 (取得 email)
+deactivate UserModel
+
+NotificationService -> UserModel: User.query.get(animal.owner_id)
+activate UserModel
+UserModel -> DB: SELECT * FROM users WHERE user_id=?
+activate DB
+DB --> UserModel: owner 資料
+deactivate DB
+UserModel --> NotificationService: Owner 物件 (取得聯絡資訊)
+deactivate UserModel
+
+NotificationService -> EmailTasks: send_application_notification_email_task.delay(\\n  user_email=applicant.email,\\n  animal_name=animal.name,\\n  status='approved' or 'rejected',\\n  message=review_notes,\\n  contact_info={name, email, phone})
+activate EmailTasks
+note right
+  透過 Celery 非同步處理:
+  - user_email: 申請者 Email
+  - animal_name: 動物名稱
+  - status: 'approved' 或 'rejected'
+  - message: 審核意見 (review_notes)
+  - contact_info: 送養者聯絡資訊
+    (只在 approved 時包含)
+end note
+
+EmailTasks -> CeleryWorker: 加入任務佇列
+activate CeleryWorker
+EmailTasks --> NotificationService: 任務已排程
+deactivate EmailTasks
+deactivate NotificationService
+
+== 5. Celery Worker 處理 Email ==
+CeleryWorker -> EmailService: send_email(\\n  to=user_email,\\n  subject='申請已通過/拒絕',\\n  template='application_notification',\\n  context={...})
+activate EmailService
+
+EmailService -> EmailService: 渲染 Email 模板
+note right
+  根據 status 選擇內容:
+  
+  **approved (核准)**:
+  - 主旨: "您的領養申請已通過 - {animal_name}"
+  - 內容: 恭喜訊息
+  - 包含: 審核意見、送養者聯絡方式
+  - 引導: 請盡快聯絡送養者
+  
+  **rejected (拒絕)**:
+  - 主旨: "關於您的領養申請 - {animal_name}"
+  - 內容: 婉轉說明
+  - 包含: 審核意見 (拒絕原因)
+  - 引導: 可繼續瀏覽其他動物
+end note
+
+EmailService -> EmailService: 透過 SMTP 發送郵件
+note right
+  使用配置的 SMTP 服務:
+  - Gmail / AWS SES 等
+  - 重試機制: 最多 3 次
+  - 失敗時記錄錯誤
+end note
+
+alt 發送成功
+  EmailService --> CeleryWorker: 發送成功
+  CeleryWorker -> CeleryWorker: 記錄發送成功日誌
+else 發送失敗
+  EmailService --> CeleryWorker: 發送失敗
+  CeleryWorker -> CeleryWorker: 重試 (最多 3 次)
+  note right
+    重試延遲: 60 * (2 ^ retries) 秒
+    - 第 1 次: 60 秒後
+    - 第 2 次: 120 秒後
+    - 第 3 次: 240 秒後
+  end note
+end
+
+deactivate EmailService
+deactivate CeleryWorker
+
+== 6. 申請者接收系統通知 ==
+Applicant -> NotificationBell: 登入系統後查看通知鈴鐺
+activate NotificationBell
+
+NotificationBell -> NotificationComposable: startPolling()
+activate NotificationComposable
+note right
+  通知輪詢機制:
+  - 每 30 秒自動檢查
+  - 頁面載入時立即執行
+  - 離開頁面時停止
+end note
+
+NotificationComposable -> NotificationBlueprint: GET /notifications/unread-count
+activate NotificationBlueprint
+NotificationBlueprint -> DB: SELECT COUNT(*) FROM notifications\\nWHERE recipient_id=? AND read=FALSE
+activate DB
+DB --> NotificationBlueprint: unread_count
+deactivate DB
+NotificationBlueprint --> NotificationComposable: {unread_count: N}
+deactivate NotificationBlueprint
+
+NotificationComposable --> NotificationBell: 更新未讀數量徽章
+NotificationBell --> Applicant: 顯示紅色數字徽章 (N)
+deactivate NotificationComposable
+deactivate NotificationBell
+
+== 7. 申請者查看通知詳情 ==
+Applicant -> NotificationBell: 點擊通知鈴鐺
+activate NotificationBell
+NotificationBell -> NotificationPage: 導航到 /notifications
+activate NotificationPage
+
+NotificationPage -> NotificationComposable: fetchNotifications()
+activate NotificationComposable
+NotificationComposable -> NotificationBlueprint: GET /notifications
+activate NotificationBlueprint
+NotificationBlueprint -> NotificationModel: Notification.query.filter_by(\\n  recipient_id=current_user_id,\\n  deleted_at=None).order_by(created_at.desc())
+activate NotificationModel
+NotificationModel -> DB: SELECT * FROM notifications\\nWHERE recipient_id=? AND deleted_at IS NULL\\nORDER BY created_at DESC
+activate DB
+DB --> NotificationModel: notifications 列表
+deactivate DB
+NotificationModel --> NotificationBlueprint: Notification 物件列表
+deactivate NotificationModel
+NotificationBlueprint --> NotificationComposable: {notifications: [...], total: N}
+deactivate NotificationBlueprint
+
+NotificationComposable --> NotificationPage: 通知列表資料
+deactivate NotificationComposable
+
+NotificationPage -> NotificationPage: 渲染通知卡片
+note right
+  通知卡片顯示:
+  - 圖示: ✅ (approved) 或 ❌ (rejected)
+  - 標題: "申請已通過" 或 "申請已拒絕"
+  - 內容: "您的申請已通過：{animal_name}"
+  - 時間: "X 分鐘前" / "X 小時前"
+  - 狀態: 未讀 (藍色邊框) / 已讀
+  
+  審核意見:
+  - 顯示在通知內容中
+  - 可展開查看完整訊息
+end note
+
+NotificationPage --> Applicant: 顯示通知列表
+deactivate NotificationBell
+
+== 8. 申請者點擊通知 ==
+Applicant -> NotificationPage: 點擊通知卡片
+activate NotificationPage
+
+NotificationPage -> NotificationComposable: markAsRead(notification_id)
+activate NotificationComposable
+NotificationComposable -> NotificationBlueprint: POST /notifications/{id}/mark-read
+activate NotificationBlueprint
+NotificationBlueprint -> NotificationModel: notification.read = True\\nnotification.read_at = NOW()
+activate NotificationModel
+NotificationModel -> DB: UPDATE notifications\\nSET read=TRUE, read_at=NOW()\\nWHERE notification_id=?
+activate DB
+DB --> NotificationModel: 更新成功
+deactivate DB
+NotificationModel --> NotificationBlueprint: Notification 物件
+deactivate NotificationModel
+NotificationBlueprint --> NotificationComposable: 已標記為已讀
+deactivate NotificationBlueprint
+
+NotificationComposable --> NotificationPage: 更新本地狀態
+deactivate NotificationComposable
+
+alt 申請已通過 (APPROVED)
+  NotificationPage -> NotificationPage: 顯示審核意見和送養者聯絡資訊
+  note right
+    通知內容包含:
+    - 動物名稱和資訊
+    - 審核者的評論/意見
+    - 送養者聯絡方式:
+      * 姓名
+      * Email
+      * 電話 (如有)
+    - 提示: "請盡快聯絡送養者安排領養事宜"
+  end note
+  
+  NotificationPage --> Applicant: 顯示完整審核結果和聯絡資訊
+  
+  Applicant -> Applicant: 根據聯絡資訊連絡送養者
+  note right
+    申請者可以:
+    1. 複製送養者 Email
+    2. 撥打電話
+    3. 透過平台訊息聯繫 (若有)
+    
+    後續領養流程:
+    - 約定時間見面
+    - 確認領養條件
+    - 辦理領養手續
+    - 完成動物交接
+  end note
+  
+else 申請已拒絕 (REJECTED)
+  NotificationPage -> NotificationPage: 顯示拒絕原因
+  note right
+    通知內容包含:
+    - 動物名稱和資訊
+    - 拒絕原因 (review_notes)
+    - 鼓勵訊息:
+      "感謝您的申請，請不要氣餒"
+      "歡迎繼續瀏覽其他待領養動物"
+    
+    不包含送養者聯絡資訊
+  end note
+  
+  NotificationPage --> Applicant: 顯示拒絕原因和鼓勵訊息
+  
+  Applicant -> Applicant: 可繼續瀏覽其他動物
+end
+
+deactivate NotificationPage
+
+== 9. 申請者接收 Email ==
+note over Applicant, EmailService
+  並行處理: Email 通知與系統通知同時進行
+  申請者會在收件匣收到郵件
+end note
+
+Applicant -> Applicant: 檢查 Email 收件匣
+note right
+  Email 內容與系統通知一致:
+  - HTML 格式，排版美觀
+  - 包含平台 Logo 和品牌元素
+  - 核准時包含送養者完整聯絡資訊
+  - 包含返回平台連結
+  
+  Email 優勢:
+  - 即時收到通知 (不需登入平台)
+  - 可保存為記錄
+  - 方便轉發給家人討論
+end note
+
+note over Applicant, DB
+  **後置條件:**
+  1. 系統內通知已建立並存入資料庫
+  2. Email 已透過 Celery 非同步發送給申請者
+  3. 申請者可在通知中心查看審核結果
+  4. 核准時，申請者可取得送養者聯絡資訊
+  5. 拒絕時，申請者可查看拒絕原因
+  6. 通知支援標記已讀和刪除操作
+  
+  **通知類型:**
+  - application_approved: 申請已通過
+  - application_rejected: 申請已拒絕
+  
+  **通知內容 (payload):**
+  - application_id: 申請 ID
+  - animal_id: 動物 ID
+  - animal_name: 動物名稱
+  - status: APPROVED / REJECTED
+  - review_notes: 審核意見
+  
+  **Email 內容:**
+  - 主旨: 根據狀態自動生成
+  - 模板: application_notification
+  - 上下文變數:
+    * animal_name: 動物名稱
+    * status: 審核狀態
+    * message: 審核意見
+    * contact_info: 送養者聯絡資訊 (僅核准時)
+  
+  **輪詢機制:**
+  - 間隔: 30 秒
+  - 自動: 登入後自動啟動
+  - 停止: 離開頁面時停止
+  - API: GET /notifications/unread-count
+  
+  **Celery 非同步處理:**
+  - 任務: send_application_notification_email_task
+  - 重試: 最多 3 次
+  - 延遲: 指數退避 (60s, 120s, 240s)
+  - 錯誤: 記錄到日誌但不影響主流程
+  
+  **前端通知中心功能:**
+  - 顯示所有通知 (已讀/未讀)
+  - 篩選: 全部 / 未讀 / 已讀
+  - 操作: 標記已讀 / 全部已讀 / 刪除
+  - 即時: 通過輪詢保持最新狀態
+  - 導航: 點擊通知可跳轉相關頁面
+end note
+
+@enduml

@@ -1,33 +1,198 @@
-@startuml
-title Use Case 3.1/3.3: Application Review
-actor Reviewer
-participant ApplicationReview.vue
-participant applications.ts
-participant applications.py
-participant application_service.py
-participant notification_service.py
-database MySQL
+@startuml 使用案例3_1: 申請列表瀏覽
+title 使用案例3.1: 申請列表瀏覽
 
-Reviewer -> ApplicationReview.vue: Visit /application-review
-ApplicationReview.vue -> applications.ts: listApplications()
-applications.ts -> applications.py: GET /applications
-applications.py -> application_service.py: list_applications()
-application_service.py -> MySQL: SELECT applications
-MySQL --> application_service.py: applications[]
-application_service.py --> applications.py: result
-applications.py --> applications.ts: 200 OK
-applications.ts --> ApplicationReview.vue: applications
-ApplicationReview.vue --> Reviewer: Display applications
+actor "審核者" as User
+participant "ApplicationReview.vue" as ApplicationReviewPage
+participant "applications.ts" as ApplicationAPI
+participant "applications.py(blueprint)" as ApplicationBlueprint
+participant "application_service.py" as ApplicationService
+participant "application.py(model)" as ApplicationModel
+participant "animal.py(model)" as AnimalModel
+participant "user.py(model)" as UserModel
+database "MySQL" as DB
 
-Reviewer -> ApplicationReview.vue: Approve/Reject
-ApplicationReview.vue -> applications.ts: updateApplication()
-applications.ts -> applications.py: PATCH /applications/{id}
-applications.py -> application_service.py: update_status()
-application_service.py -> MySQL: UPDATE applications
-application_service.py -> notification_service.py: notify_applicant()
-notification_service.py -> MySQL: INSERT notification
-application_service.py --> applications.py: success
-applications.py --> applications.ts: 200 OK
-applications.ts --> ApplicationReview.vue: success
-ApplicationReview.vue --> Reviewer: Success message
+== 1. 進入申請管理頁面 ==
+User -> ApplicationReviewPage: 訪問 /application-review
+activate ApplicationReviewPage
+ApplicationReviewPage -> ApplicationReviewPage: onMounted()
+note right
+  角色說明:
+  - ADMIN: 可查看所有申請
+  - SHELTER_MEMBER: 查看收容所動物申請
+  - GENERAL_MEMBER: 查看個人動物申請
+end note
+
+== 2. 載入申請列表 ==
+ApplicationReviewPage -> ApplicationAPI: getApplications(filters)
+activate ApplicationAPI
+note right
+  filters:
+  - mode: 'review' (固定使用審核模式)
+  - status: 狀態篩選 (all/PENDING/UNDER_REVIEW/APPROVED/REJECTED)
+  - animal_id: 特定動物 (從 URL query 參數)
+  - page: 頁碼
+  - per_page: 每頁筆數 (預設 10)
+  
+  註: ApplicationReview.vue 固定使用 review 模式
+  其他模式 (my/all) 用於 MyApplications.vue
+end note
+ApplicationAPI -> ApplicationBlueprint: GET /applications
+activate ApplicationBlueprint
+
+ApplicationBlueprint -> ApplicationBlueprint: @jwt_required()\\n取得 current_user_id
+ApplicationBlueprint -> UserModel: User.query.get(current_user_id)
+activate UserModel
+UserModel -> DB: SELECT * FROM users WHERE user_id=?
+activate DB
+DB --> UserModel: 使用者資料
+deactivate DB
+UserModel --> ApplicationBlueprint: User 物件
+deactivate UserModel
+
+ApplicationBlueprint -> ApplicationService: list_applications(current_user, filters)
+activate ApplicationService
+
+== 3. 權限過濾邏輯 ==
+ApplicationService -> ApplicationService: 基礎查詢\\nApplication.query.filter_by(deleted_at=None)
+
+alt user.role == ADMIN
+  ApplicationService -> ApplicationService: 管理員可查看所有申請
+  note right
+    無額外過濾條件
+  end note
+else user.role != ADMIN
+  ApplicationService -> AnimalModel: 查詢使用者擁有的動物
+  activate AnimalModel
+  
+  ApplicationService -> AnimalModel: 1. 查詢個人送養動物
+  AnimalModel -> DB: SELECT animal_id FROM animals\\nWHERE owner_id=? AND deleted_at IS NULL
+  activate DB
+  DB --> AnimalModel: personal_animals[]
+  deactivate DB
+  AnimalModel --> ApplicationService: owned_animal_ids[]
+  
+  alt user.role == SHELTER_MEMBER AND primary_shelter_id 存在
+    ApplicationService -> AnimalModel: 2. 查詢收容所動物
+    AnimalModel -> DB: SELECT animal_id FROM animals\\nWHERE shelter_id=? AND deleted_at IS NULL
+    activate DB
+    DB --> AnimalModel: shelter_animals[]
+    deactivate DB
+    AnimalModel --> ApplicationService: 加入 owned_animal_ids[]
+  end
+  deactivate AnimalModel
+  
+  ApplicationService -> ApplicationService: 應用 review 模式過濾
+  note right
+    mode='review': 僅顯示別人對自己動物的申請
+    filter(animal_id IN owned_animal_ids)
+    
+    註: 其他模式 (my/all) 在此圖中不適用
+    ApplicationReview.vue 固定使用 review 模式
+    MyApplications.vue 使用 my 或 all 模式
+  end note
+end
+
+== 4. 應用其他篩選條件 ==
+alt 有 status 篩選
+  ApplicationService -> ApplicationService: query.filter_by(status=?)
+end
+
+alt 有 animal_id 篩選
+  ApplicationService -> ApplicationService: query.filter_by(animal_id=?)
+end
+
+alt 有 applicant_id 篩選
+  ApplicationService -> ApplicationService: 檢查權限
+  note right
+    非管理員只能查詢自己的申請
+  end note
+  ApplicationService -> ApplicationService: query.filter_by(applicant_id=?)
+end
+
+== 5. 執行查詢並返回 ==
+ApplicationService -> ApplicationModel: query.order_by(created_at DESC).paginate(...)
+activate ApplicationModel
+ApplicationModel -> DB: SELECT * FROM applications\\nWHERE ... ORDER BY created_at DESC\\nLIMIT ? OFFSET ?
+activate DB
+note right
+  包含所有篩選條件和分頁
+  JOIN 相關資料:
+  - applicant (User)
+  - animal (Animal)
+  - assignee (User)
+end note
+DB --> ApplicationModel: applications[]
+deactivate DB
+ApplicationModel --> ApplicationService: pagination 物件
+deactivate ApplicationModel
+
+ApplicationService -> ApplicationService: 組裝回應
+note right
+  {
+    items: [app.to_dict(include_relations=True)],
+    total: pagination.total,
+    page: page,
+    per_page: per_page,
+    pages: pagination.pages
+  }
+end note
+ApplicationService --> ApplicationBlueprint: {items[], pagination}
+deactivate ApplicationService
+
+ApplicationBlueprint --> ApplicationAPI: 200 OK + {items[], pagination}
+deactivate ApplicationBlueprint
+ApplicationAPI --> ApplicationReviewPage: {applications[], pagination}
+deactivate ApplicationAPI
+
+ApplicationReviewPage -> ApplicationReviewPage: 更新畫面\\napplications.value = response.items
+ApplicationReviewPage -> ApplicationReviewPage: 計算統計卡片數據
+note right
+  統計從前端已載入的申請計算:
+  - pending: filter(status === 'PENDING').length
+  - underReview: filter(status === 'UNDER_REVIEW').length
+  - approved: filter(status === 'APPROVED').length
+  - rejected: filter(status === 'REJECTED').length
+  
+  註: 統計數字反映當前頁面數據,非全部總數
+end note
+ApplicationReviewPage --> User: 顯示申請列表 (含統計卡片)
+deactivate ApplicationReviewPage
+
+== 6. 替代流程 - 篩選切換 ==
+opt 使用者切換篩選
+  User -> ApplicationReviewPage: 點擊篩選標籤 (全部/待審核/審核中/已通過/已拒絕)
+  activate ApplicationReviewPage
+  ApplicationReviewPage -> ApplicationReviewPage: changeFilter(filter)
+  ApplicationReviewPage -> ApplicationReviewPage: currentFilter.value = filter
+  ApplicationReviewPage -> ApplicationReviewPage: pagination.page = 1 (重置頁碼)
+  ApplicationReviewPage -> ApplicationReviewPage: fetchApplications() (使用新篩選)
+  note right: 回到步驟 2 重新載入列表
+  ApplicationReviewPage --> User: 顯示篩選後的申請
+  deactivate ApplicationReviewPage
+end
+
+note over User, DB
+  **後置條件:**
+  1. 申請列表已載入並顯示 (含權限過濾)
+  2. 列表資料已正確分頁
+  3. 統計卡片已更新 (從前端數據計算,反映當前頁面)
+  
+  **權限控制:**
+  - 管理員: 查看所有申請
+  - 送養人: 查看自己動物的申請
+  - 收容所會員: 查看所屬收容所動物的申請
+  
+  **查詢模式 (ApplicationReview.vue):**
+  - 固定使用 review 模式: 別人對自己動物的申請
+  - 其他模式在不同頁面:
+    - my 模式: MyApplications.vue (自己提交的申請)
+    - all 模式: 需要時可用 (自己申請 OR 自己動物的申請)
+  
+  **篩選功能:**
+  - status: all, PENDING, UNDER_REVIEW, APPROVED, REJECTED
+  - animal_id: 特定動物的申請 (從 URL query)
+  - applicant_id: 特定申請人 (限管理員,此頁面不使用)
+  - 分頁: page (切換篩選時重置為 1), per_page (預設 10)
+end note
+
 @enduml

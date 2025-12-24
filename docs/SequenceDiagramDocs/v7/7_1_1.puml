@@ -1,0 +1,321 @@
+@startuml 使用案例7_1_1_帳號驗證
+title 使用案例7.1.1: 帳號驗證流程 (Email 驗證碼)
+
+actor "新註冊使用者" as NewUser
+participant "VerifyRegistration.vue" as VerifyPage
+participant "client.ts" as APIClient
+participant "auth.py(blueprint)" as AuthBlueprint
+participant "auth_service.py" as AuthService
+participant "email_service.py" as EmailService
+participant "audit_service.py" as AuditService
+participant "pending_registration.py(model)" as PendingModel
+participant "user.py(model)" as UserModel
+database "MySQL" as DB
+
+== 1. 註冊完成後導向驗證頁面 ==
+note over NewUser
+  前提條件:
+  - 使用者剛完成 7.1 註冊流程
+  - 已收到驗證碼郵件
+  - URL 帶有 pending_id, masked_email, role
+end note
+
+NewUser -> VerifyPage: 被導向至\n/verify-registration?pending_id=xxx&masked=a***@example.com&role=GENERAL_MEMBER
+activate VerifyPage
+VerifyPage -> VerifyPage: 取得 route.query 參數\npendingId, maskedEmail, roleFromQuery
+VerifyPage -> VerifyPage: 顯示驗證表單\n+ 遮蔽後的 Email
+note right
+  顯示內容:
+  - "已將驗證碼寄至：a***@example.com"
+  - 6 位數驗證碼輸入框
+  - "驗證" 按鈕
+  - "重新發送驗證碼" 連結
+end note
+VerifyPage --> NewUser: 顯示驗證頁面
+deactivate VerifyPage
+
+== 2. 查看 Email 驗證碼 ==
+NewUser -> NewUser: 開啟 Email 信箱\n查看註冊驗證碼
+note left
+  Email 內容 (from 7.1):
+  主旨: "[App] 註冊驗證碼"
+  內容: "您的註冊驗證碼為： 123456
+  此驗證碼於 15 分鐘後失效。
+  如非您本人操作，請忽略本信。"
+end note
+
+== 3. 輸入驗證碼 ==
+NewUser -> VerifyPage: 輸入驗證碼 (6位數字)
+activate VerifyPage
+VerifyPage -> VerifyPage: v-model="code"\n更新 code 值
+VerifyPage --> NewUser: 顯示輸入內容
+deactivate VerifyPage
+
+== 4. 提交驗證碼 ==
+NewUser -> VerifyPage: 點擊「驗證」按鈕
+activate VerifyPage
+VerifyPage -> VerifyPage: submitCode()\n@submit.prevent
+VerifyPage -> VerifyPage: 檢查 pendingId 和 code\n是否存在
+
+alt pendingId 或 code 為空
+    VerifyPage --> NewUser: 不執行任何動作
+    note left: 欄位未填寫完整
+else 欄位齊全
+    VerifyPage -> VerifyPage: loading = true
+    VerifyPage -> VerifyPage: 組裝 payload\n{ pending_id, code, role }
+end
+
+== 5. 呼叫驗證 API ==
+VerifyPage -> APIClient: api.post('/auth/verify-registration', payload)
+activate APIClient
+APIClient -> APIClient: 添加 baseURL
+APIClient -> AuthBlueprint: POST /auth/verify-registration\nBody: { pending_id, code, role }
+activate AuthBlueprint
+
+== 6. 後端驗證欄位 ==
+AuthBlueprint -> AuthBlueprint: data = request.get_json()
+AuthBlueprint -> AuthBlueprint: 檢查必填欄位\n(pending_id, code)
+
+alt 缺少必填欄位
+    AuthBlueprint --> APIClient: 400 Bad Request\n{"message": "pending_id 和 code 為必填"}
+    APIClient --> VerifyPage: error (400)
+    VerifyPage -> VerifyPage: message = "驗證失敗"\nmessageClass = 'bg-red-50'
+    VerifyPage --> NewUser: 顯示錯誤訊息\n(紅色提示框)
+    note left: 中斷流程
+else 欄位齊全
+    AuthBlueprint -> AuthBlueprint: 取得 pending_id, code, role
+end
+
+== 7. 查詢待註冊記錄 ==
+AuthBlueprint -> AuthService: verify_registration(\npending_id, code, role)
+activate AuthService
+
+AuthService -> PendingModel: db.session.get(\nPendingRegistration, pending_id)
+activate PendingModel
+PendingModel -> DB: SELECT * FROM pending_registrations\nWHERE pending_id=:id\nLIMIT 1
+activate DB
+DB --> PendingModel: PendingRegistration 或 None
+deactivate DB
+PendingModel --> AuthService: pending
+deactivate PendingModel
+
+alt 找不到待註冊記錄
+    AuthService --> AuthBlueprint: raise NotFoundError\n("找不到對應的驗證流程")
+    AuthBlueprint --> APIClient: 404 Not Found\n{"message": "找不到對應的驗證流程"}
+    APIClient --> VerifyPage: error (404)
+    VerifyPage -> VerifyPage: message = "驗證失敗"
+    VerifyPage --> NewUser: 顯示錯誤訊息
+    note left: 中斷流程
+else 找到待註冊記錄
+    AuthService -> AuthService: 取得 pending 物件
+end
+
+== 8. 檢查驗證碼是否過期 ==
+AuthService -> AuthService: 比較 pending.code_expires_at\n與 datetime.utcnow()
+note right
+  驗證碼有效期: 15 分鐘
+  從 register_pending() 建立時開始計算
+end note
+
+alt 驗證碼已過期
+    AuthService -> PendingModel: db.session.delete(pending)
+    activate PendingModel
+    PendingModel -> DB: DELETE FROM pending_registrations\nWHERE pending_id=:id
+    activate DB
+    DB --> PendingModel: 刪除成功
+    deactivate DB
+    deactivate PendingModel
+    
+    AuthService -> DB: db.session.commit()
+    activate DB
+    DB --> AuthService: 提交成功
+    deactivate DB
+    
+    AuthService --> AuthBlueprint: raise ValidationError\n("驗證碼已過期，請重新註冊或重新發送")
+    AuthBlueprint --> APIClient: 400 Bad Request\n{"message": "驗證碼已過期..."}
+    APIClient --> VerifyPage: error (400)
+    VerifyPage -> VerifyPage: message = "驗證碼已過期..."
+    VerifyPage --> NewUser: 顯示過期錯誤訊息
+    note left: 中斷流程，建議重新註冊
+else 驗證碼未過期
+    AuthService -> AuthService: 繼續驗證流程
+end
+
+== 9. 驗證驗證碼正確性 ==
+AuthService -> AuthService: verify_verification_code(\ncode, pending.verification_code_hash)
+note right
+  使用雜湊比對:
+  將輸入的 code 雜湊後
+  與資料庫的 code_hash 比對
+end note
+
+alt 驗證碼錯誤
+    AuthService -> AuthService: pending.attempts += 1
+    AuthService -> DB: db.session.commit()\n更新嘗試次數
+    activate DB
+    DB --> AuthService: 提交成功
+    deactivate DB
+    
+    alt 嘗試次數 >= 5
+        AuthService -> PendingModel: db.session.delete(pending)
+        activate PendingModel
+        PendingModel -> DB: DELETE FROM pending_registrations
+        activate DB
+        DB --> PendingModel: 刪除成功
+        deactivate DB
+        deactivate PendingModel
+        
+        AuthService -> DB: db.session.commit()
+        activate DB
+        DB --> AuthService: 提交成功
+        deactivate DB
+        
+        AuthService --> AuthBlueprint: raise ValidationError\n("驗證失敗次數過多，請重新註冊")
+        AuthBlueprint --> APIClient: 400 Bad Request\n{"message": "驗證失敗次數過多..."}
+        APIClient --> VerifyPage: error (400)
+        VerifyPage --> NewUser: 顯示錯誤：嘗試次數過多
+        note left: 中斷流程
+    else 嘗試次數 < 5
+        AuthService --> AuthBlueprint: raise ValidationError\n("驗證碼錯誤")
+        AuthBlueprint --> APIClient: 400 Bad Request\n{"message": "驗證碼錯誤"}
+        APIClient --> VerifyPage: error (400)
+        VerifyPage -> VerifyPage: message = "驗證碼錯誤"
+        VerifyPage --> NewUser: 顯示錯誤：請重新輸入
+        note left: 可繼續嘗試
+    end
+else 驗證碼正確
+    AuthService -> AuthService: 驗證通過，準備建立用戶
+end
+
+== 10. 再次檢查 Email 是否已註冊 ==
+AuthService -> UserModel: User.query.filter_by(email=pending.email).first()
+activate UserModel
+UserModel -> DB: SELECT * FROM users\nWHERE email=:email\nLIMIT 1
+activate DB
+DB --> UserModel: User 或 None
+deactivate DB
+UserModel --> AuthService: existing_user
+deactivate UserModel
+
+alt Email 已被其他人註冊
+    AuthService -> PendingModel: db.session.delete(pending)
+    activate PendingModel
+    PendingModel -> DB: DELETE FROM pending_registrations
+    activate DB
+    DB --> PendingModel: 刪除成功
+    deactivate DB
+    deactivate PendingModel
+    
+    AuthService -> DB: db.session.commit()
+    activate DB
+    DB --> AuthService: 提交成功
+    deactivate DB
+    
+    AuthService --> AuthBlueprint: raise ConflictError\n("此 email 已被註冊")
+    AuthBlueprint --> APIClient: 409 Conflict\n{"message": "此 email 已被註冊"}
+    APIClient --> VerifyPage: error (409)
+    VerifyPage --> NewUser: 顯示衝突錯誤
+    note left: 中斷流程
+else Email 未被註冊
+    AuthService -> AuthService: 繼續建立用戶
+end
+
+== 11. 確定用戶角色 ==
+AuthService -> AuthService: role_to_set = UserRole.GENERAL_MEMBER\n(預設值)
+
+alt role 參數有值
+    AuthService -> AuthService: try:\n  role_to_set = UserRole(role)\nexcept ValueError:\n  使用預設值
+    note right
+      支援的角色:
+      - GENERAL_MEMBER (個人)
+      - SHELTER_MEMBER (收容所)
+      - ADMIN (管理員)
+    end note
+end
+
+== 12. 建立正式用戶帳號 ==
+AuthService -> UserModel: user = User(\nemail, password_hash, username,\nphone_number, region, address,\nrole, verified=True)
+activate UserModel
+note right
+  從 PendingRegistration 複製資料:
+  - email
+  - password_hash (已雜湊)
+  - username
+  - phone_number
+  - region
+  - address
+  - role (確定後的角色)
+  - verified=True (已驗證)
+end note
+
+UserModel -> DB: INSERT INTO users\nVALUES (...)
+activate DB
+DB --> UserModel: user_id (auto_increment)
+deactivate DB
+UserModel --> AuthService: user 物件
+deactivate UserModel
+
+== 13. 刪除待註冊記錄 ==
+AuthService -> PendingModel: db.session.delete(pending)
+activate PendingModel
+PendingModel -> DB: DELETE FROM pending_registrations\nWHERE pending_id=:id
+activate DB
+DB --> PendingModel: 刪除成功
+deactivate DB
+deactivate PendingModel
+
+AuthService -> DB: db.session.commit()\n提交兩筆變更 (新增 User + 刪除 Pending)
+activate DB
+DB --> AuthService: 交易成功
+deactivate DB
+
+note right
+  原子性操作:
+  1. INSERT users
+  2. DELETE pending_registrations
+  一起提交，確保資料一致性
+end note
+
+== 14. 記錄審計日誌 ==
+AuthService -> AuditService: audit_service.log(\naction='user.register',\nactor_id=user.user_id,\ntarget_type='user',\ntarget_id=user.user_id,\nbefore_state=None,\nafter_state={'email': user.email})
+activate AuditService
+AuditService -> DB: INSERT INTO audit_logs\nVALUES (...)
+activate DB
+DB --> AuditService: 記錄成功
+deactivate DB
+AuditService --> AuthService: 審計完成
+deactivate AuditService
+
+AuthService --> AuthBlueprint: return user
+deactivate AuthService
+
+== 15. 回傳驗證成功 ==
+AuthBlueprint --> APIClient: 200 OK\n{\n  "message": "驗證成功，帳號已建立"\n}
+deactivate AuthBlueprint
+APIClient --> VerifyPage: response.data
+deactivate APIClient
+
+== 16. 顯示成功訊息並導向登入 ==
+VerifyPage -> VerifyPage: message = '驗證成功，請使用您的帳號登入'\nmessageClass = 'bg-green-50'
+VerifyPage --> NewUser: 顯示成功訊息\n(綠色提示框)
+deactivate VerifyPage
+
+NewUser -> NewUser: 看到成功訊息
+
+VerifyPage -> VerifyPage: setTimeout(() => {\n  router.push('/login')\n}, 2000)
+note right
+  2 秒後自動導向登入頁面
+end note
+
+VerifyPage --> NewUser: 2 秒後自動導向至\n/login 登入頁面
+NewUser -> NewUser: 使用新帳號登入系統
+note left
+  下一步:
+  使用者可以用
+  註冊的 Email 和密碼
+  登入系統
+  
+  參考: 使用案例 7.2 (使用者登入)
+end note
+
+@enduml

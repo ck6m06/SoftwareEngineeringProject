@@ -1,0 +1,293 @@
+﻿@startuml 使用案例4_3_醫療紀錄驗證
+title 使用案例4.3: 醫療紀錄驗證流程
+
+actor "管理員" as Admin
+participant "MedicalRecords.vue" as MedicalPage
+participant "medicalRecords.ts" as MedicalAPI
+participant "medical_records.py(blueprint)" as MedicalBlueprint
+participant "medical_record_service.py" as MedicalService
+participant "medical_record.py(model)" as MedicalModel
+participant "user.py(model)" as UserModel
+database "MySQL" as DB
+
+== 1. 進入醫療紀錄管理頁面 ==
+Admin -> MedicalPage: 訪問「/medical-records」路由
+activate MedicalPage
+MedicalPage -> MedicalPage: onMounted()\n初始化頁面
+MedicalPage -> MedicalPage: isAdmin = computed(() => \nauthStore.user?.role === 'ADMIN')
+note right
+  isAdmin computed:
+  - 計算當前用戶是否為管理員
+  - 用於控制驗證按鈕的顯示
+  - 所有角色都可進入此頁面
+end note
+
+== 2. 載入動物列表 ==
+MedicalPage -> MedicalAPI: getAnimalsForMedicalRecords()
+activate MedicalAPI
+note right
+  GET /medical-records/animals:
+  - 帶篩選參數的動物列表 API
+  - 管理員可看到所有動物
+  - 一般會員/收容所會員看到可管理的動物
+  - 與 4.1 流程相同
+end note
+MedicalAPI -> MedicalBlueprint: GET /medical-records/animals\n(JWT Token + 篩選參數)
+activate MedicalBlueprint
+MedicalBlueprint --> MedicalAPI: 200 OK {animals[]}
+deactivate MedicalBlueprint
+MedicalAPI --> MedicalPage: {animals[], total}
+deactivate MedicalAPI
+
+== 3. 選擇動物並載入醫療紀錄 ==
+Admin -> MedicalPage: 點選動物卡片
+MedicalPage -> MedicalPage: selectAnimal(animal)\nselectedAnimal = animal
+MedicalPage -> MedicalAPI: getMedicalRecords(animal_id)
+activate MedicalAPI
+note right
+  與 4.2 流程相同
+  載入該動物的所有醫療紀錄
+end note
+MedicalAPI -> MedicalBlueprint: GET /medical-records/animals/{id}/medical-records
+activate MedicalBlueprint
+MedicalBlueprint --> MedicalAPI: 200 OK {medical_records[]}
+deactivate MedicalBlueprint
+MedicalAPI --> MedicalPage: {total, medical_records[]}
+deactivate MedicalAPI
+
+== 4. 顯示醫療紀錄清單 ==
+MedicalPage -> MedicalPage: records = response.medical_records
+MedicalPage -> MedicalPage: 渲染醫療紀錄清單
+note right
+  每筆紀錄顯示:
+  - record_type (類型徽章)
+  - date (紀錄時間)
+  - provider (醫療提供者)
+  - details (詳細說明)
+  - attachments[] (證明文件)
+  - verified (驗證狀態)
+  
+  驗證按鈕顯示控制:
+  - v-if="isAdmin" 條件渲染
+  - 只有管理員能看到驗證按鈕
+  - 建立者看到編輯按鈕 (canEditRecord)
+end note
+
+loop 每筆醫療紀錄
+    alt isAdmin && verified === false
+        MedicalPage -> MedicalPage: 顯示「✓ 驗證」按鈕\n(綠色)
+    else isAdmin && verified === true
+        MedicalPage -> MedicalPage: 顯示「✗ 撤銷驗證」按鈕\n(紅色)
+        MedicalPage -> MedicalPage: 顯示驗證標章 ✓
+    end
+end
+
+MedicalPage --> Admin: 顯示醫療紀錄清單\n(含驗證按鈕)
+deactivate MedicalPage
+
+== 5. 管理員檢視醫療紀錄內容 ==
+Admin -> MedicalPage: 檢視醫療紀錄詳情
+activate MedicalPage
+MedicalPage -> MedicalPage: 顯示完整資訊
+note right
+  管理員檢視內容:
+  - 紀錄類型
+  - 紀錄日期
+  - 醫療提供者
+  - 詳細說明
+  - 醫療證明文件
+  - 當前驗證狀態
+  - 創建者資訊
+end note
+
+Admin -> Admin: 檢視醫療證明文件\n(attachments[])
+Admin -> Admin: 評估醫療紀錄真實性
+deactivate MedicalPage
+
+== 6. 點擊驗證按鈕 ==
+Admin -> MedicalPage: 點擊「✓ 驗證」或「✗ 撤銷驗證」
+activate MedicalPage
+MedicalPage -> MedicalPage: handleVerify(recordId, verified)
+note right
+  verified 參數:
+  - true: 驗證通過
+  - false: 撤銷驗證
+end note
+
+== 7. 發送驗證請求 ==
+MedicalPage -> MedicalAPI: verifyMedicalRecord(recordId, verified)
+activate MedicalAPI
+MedicalAPI -> MedicalBlueprint: POST /medical-records/{id}/verify\n{verified: true/false}\n(JWT Token)
+activate MedicalBlueprint
+
+== 8. 驗證 JWT Token 並解析請求 ==
+MedicalBlueprint -> MedicalBlueprint: @jwt_required()\nget_jwt_identity()
+MedicalBlueprint -> MedicalBlueprint: current_user_id = int(JWT user_id)
+note right
+  JWT Token 驗證:
+  - 提取 user_id
+  - 轉換為 int 類型
+  - 用於後續管理員權限檢查
+end note
+MedicalBlueprint -> MedicalBlueprint: 解析請求體\nverified = data.get('verified', True)
+
+== 9. 檢查管理員權限 ==
+MedicalBlueprint -> MedicalService: verify_medical_record(\nrecord_id, current_user_id, verified)
+activate MedicalService
+MedicalService -> UserModel: db.session.get(User, current_user_id)
+activate UserModel
+UserModel -> DB: SELECT * FROM users\nWHERE user_id = :current_user_id
+activate DB
+DB --> UserModel: user 資料
+deactivate DB
+UserModel --> MedicalService: User 物件
+deactivate UserModel
+
+MedicalService -> MedicalService: 檢查 user.role == UserRole.ADMIN
+alt user is None OR user.role != ADMIN
+    MedicalService --> MedicalBlueprint: raise PermissionDeniedError
+    MedicalBlueprint --> MedicalAPI: 403 Forbidden
+    MedicalAPI --> MedicalPage: Error: 權限不足
+    MedicalPage --> Admin: ❌ 操作失敗，請重試
+else user.role == ADMIN
+    note right
+      管理員權限確認通過
+    end note
+end
+
+== 10. 查詢醫療紀錄 ==
+MedicalService -> MedicalModel: MedicalRecord.query.filter_by(\nmedical_record_id, deleted_at=None)
+activate MedicalModel
+MedicalModel -> DB: SELECT * FROM medical_records\nWHERE medical_record_id = :id\nAND deleted_at IS NULL
+activate DB
+DB --> MedicalModel: medical_record 資料
+deactivate DB
+MedicalModel --> MedicalService: MedicalRecord 物件
+deactivate MedicalModel
+
+alt record is None
+    MedicalService --> MedicalBlueprint: raise NotFoundError
+    MedicalBlueprint --> MedicalAPI: 404 Not Found
+    MedicalAPI --> MedicalPage: Error: 紀錄不存在
+    MedicalPage --> Admin: ❌ 操作失敗，請重試
+end
+
+== 11. 更新驗證狀態 ==
+MedicalService -> MedicalService: record.verified = verified
+alt verified == True (驗證通過)
+    MedicalService -> MedicalService: record.verified_by = current_user_id
+    note right
+      驗證通過:
+      - verified = True
+      - verified_by = 管理員 user_id
+    end note
+else verified == False (撤銷驗證)
+    MedicalService -> MedicalService: record.verified_by = None
+    note right
+      撤銷驗證:
+      - verified = False
+      - verified_by = None
+    end note
+end
+MedicalService -> MedicalService: record.updated_at = datetime.utcnow()
+note right
+  updated_at 時間戳:
+  - SQLAlchemy 會自動更新
+  - 記錄最後修改時間
+end note
+
+== 12. 提交資料庫變更 ==
+MedicalService -> MedicalModel: db.session.commit()
+activate MedicalModel
+MedicalModel -> DB: UPDATE medical_records\nSET verified = :verified,\nverified_by = :verified_by,\nupdated_at = :updated_at\nWHERE medical_record_id = :id
+activate DB
+DB --> MedicalModel: 更新成功
+deactivate DB
+MedicalModel --> MedicalService: commit 成功
+deactivate MedicalModel
+
+MedicalService --> MedicalBlueprint: MedicalRecord 物件
+deactivate MedicalService
+
+== 13. 回傳驗證結果 ==
+MedicalBlueprint -> MedicalBlueprint: 組裝回應資料
+MedicalBlueprint --> MedicalAPI: 200 OK\n{message, medical_record}
+deactivate MedicalBlueprint
+MedicalAPI --> MedicalPage: {message, medical_record}
+deactivate MedicalAPI
+
+== 14. 更新前端顯示 ==
+MedicalPage -> MedicalPage: 更新本地紀錄狀態
+note right
+  前端狀態更新:
+  1. 找到對應 recordIndex
+  2. records[recordIndex].verified = verified
+  3. records[recordIndex].verified_by = admin_id 或 null
+end note
+
+MedicalPage -> MedicalPage: 更新驗證按鈕樣式
+alt verified === true
+    MedicalPage -> MedicalPage: 按鈕變更為「✗ 撤銷驗證」(紅色)
+    MedicalPage -> MedicalPage: 顯示驗證標章 ✓ (綠色)
+else verified === false
+    MedicalPage -> MedicalPage: 按鈕變更為「✓ 驗證」(綠色)
+    MedicalPage -> MedicalPage: 移除驗證標章
+end
+
+MedicalPage -> MedicalPage: 顯示成功訊息
+MedicalPage --> Admin: 顯示驗證成功訊息
+deactivate MedicalPage
+
+== 15. 驗證標章顯示效果 ==
+note over Admin, DB
+  **驗證標章顯示規則:**
+  
+  在動物詳情頁:
+  - 已驗證紀錄: 顯示綠色 ✓ 標記
+  - 未驗證紀錄: 顯示灰色 ? 標記
+  
+  在醫療紀錄管理頁:
+  - 管理員可看到所有紀錄
+  - 已驗證: 顯示 ✓ 標章
+  - 未驗證: 無標章
+end note
+
+== 16. 錯誤處理情境 ==
+note over Admin, DB
+  **可能的錯誤情境:**
+  
+  1. 權限錯誤 (403): 非管理員無法驗證
+  2. 紀錄不存在 (404): 紀錄已刪除或 ID 錯誤
+  3. 網路錯誤 (500): 資料庫連線失敗
+  4. JWT Token 錯誤 (401): Token 過期或無效
+end note
+
+note over Admin, DB
+  **後置條件:**
+  1. 醫療紀錄驗證狀態已更新
+  2. verified_by 欄位記錄驗證者 user_id
+  3. updated_at 時間戳已更新
+  4. 前端顯示即時更新
+  5. 驗證標章正確顯示
+  
+  **管理員角色定位 (重要):**
+  - 管理員不能創建醫療紀錄 (canManageSelectedAnimal 對 ADMIN 返回 false)
+  - 管理員不能編輯醫療紀錄內容 (canEditRecord 對 ADMIN 返回 false)
+  - 管理員只能驗證/撤銷驗證醫療紀錄
+  - 管理員的角色是驗證記錄真實性，而非修改內容
+  - 確保醫療記錄的專業性和責任歸屬
+  
+  **驗證操作權限:**
+  - 僅管理員可執行驗證操作 (user.role == ADMIN)
+  - 管理員可查看所有動物的醫療紀錄
+  - 管理員可隨時驗證/撤銷驗證
+  - 前端通過 isAdmin computed 控制按鈕顯示
+  
+  **資料一致性:**
+  - verified = true 時，verified_by 必須有值
+  - verified = false 時，verified_by 為 NULL
+  - updated_at 記錄最後修改時間
+  - 驗證狀態變更不影響原始紀錄內容
+end note
+
+@enduml

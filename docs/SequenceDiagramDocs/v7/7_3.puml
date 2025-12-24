@@ -1,0 +1,198 @@
+@startuml 使用案例7_3_忘記密碼
+title 使用案例7.3: 忘記密碼流程
+
+actor "已註冊使用者" as RegisteredUser
+participant "ForgotPassword.vue" as ForgotPasswordPage
+participant "client.ts" as APIClient
+participant "auth.py" as AuthBlueprint
+participant "auth_service.py" as AuthService
+participant "email_service.py" as EmailService
+participant "audit_service.py" as AuditService
+participant "User Model" as UserModel
+database "MySQL" as Database
+
+== Stage 1: 進入忘記密碼頁面 ==
+RegisteredUser -> ForgotPasswordPage: 從登入頁點選「忘記密碼」\n訪問 /forgot-password
+activate ForgotPasswordPage
+ForgotPasswordPage -> ForgotPasswordPage: 顯示忘記密碼表單\nemail, success, error, loading 初始化
+note right of ForgotPasswordPage
+  初始狀態:
+  - email = ''
+  - success = false
+  - error = ''
+  - loading = false
+end note
+
+== Stage 2: 輸入 Email ==
+RegisteredUser -> ForgotPasswordPage: 輸入註冊的 Email
+activate RegisteredUser
+ForgotPasswordPage -> ForgotPasswordPage: v-model 綁定 email
+note right of ForgotPasswordPage
+  表單提示:
+  「輸入您的 email，我們將發送
+  重置密碼的連結」
+end note
+
+== Stage 3: 提交重設請求 ==
+RegisteredUser -> ForgotPasswordPage: 按下「發送重設連結」按鈕
+ForgotPasswordPage -> ForgotPasswordPage: 觸發 handleSubmit()
+ForgotPasswordPage -> ForgotPasswordPage: 驗證 email 不為空
+ForgotPasswordPage -> ForgotPasswordPage: 設定 loading = true
+
+== Stage 4: 呼叫忘記密碼 API ==
+ForgotPasswordPage -> APIClient: api.post('/auth/forgot-password',\n{ email: email.value })
+activate APIClient
+APIClient -> AuthBlueprint: POST /auth/forgot-password\nBody: { "email": "user@example.com" }
+activate AuthBlueprint
+
+== Stage 5: 後端欄位驗證 ==
+AuthBlueprint -> AuthBlueprint: 解析 JSON Body\ndata = request.get_json()
+AuthBlueprint -> AuthBlueprint: 驗證 email 欄位存在
+alt Email 欄位缺失
+  AuthBlueprint --> APIClient: 400 Bad Request\n{ "message": "Email 為必填" }
+  APIClient --> ForgotPasswordPage: 拋出錯誤
+  ForgotPasswordPage -> ForgotPasswordPage: error = "Email 為必填"
+  ForgotPasswordPage -> ForgotPasswordPage: loading = false
+  ForgotPasswordPage --> RegisteredUser: 顯示錯誤訊息
+  deactivate APIClient
+  deactivate AuthBlueprint
+else Email 欄位存在 (繼續)
+end
+
+== Stage 6: 呼叫密碼重置服務 ==
+AuthBlueprint -> AuthService: request_password_reset(email)
+activate AuthService
+note right of AuthService
+  安全設計:
+  無論 email 是否存在，
+  都返回成功訊息
+  (避免暴露用戶存在性)
+end note
+
+== Stage 7: 查詢使用者 ==
+AuthService -> UserModel: User.query.filter_by(email=email).first()
+activate UserModel
+UserModel -> Database: SELECT * FROM users\nWHERE email = :email\nAND deleted_at IS NULL
+activate Database
+Database --> UserModel: 返回 User 記錄 or None
+deactivate Database
+UserModel --> AuthService: user 對象 or None
+deactivate UserModel
+
+== Stage 8: 檢查使用者是否存在 ==
+alt 使用者不存在
+  AuthService -> AuthService: 為安全考量，返回 True\n(不暴露用戶不存在)
+  note right of AuthService
+    安全考量:
+    即使用戶不存在也返回成功
+    防止惡意探測 email 是否註冊
+  end note
+  AuthService --> AuthBlueprint: return True (不發送郵件)
+  AuthBlueprint --> APIClient: 200 OK\n{ "message": "如果該 email 存在，\n密碼重置郵件已發送" }
+  APIClient --> ForgotPasswordPage: 返回成功
+  ForgotPasswordPage -> ForgotPasswordPage: success = true
+  ForgotPasswordPage -> ForgotPasswordPage: loading = false
+  ForgotPasswordPage --> RegisteredUser: 顯示成功訊息 (綠色)\n「郵件已發送」
+  deactivate AuthService
+  deactivate AuthBlueprint
+  deactivate APIClient
+  deactivate RegisteredUser
+else 使用者存在 (繼續)
+end
+
+== Stage 9: 生成密碼重置 Token ==
+AuthService -> AuthService: token = generate_verification_token(\nuser.user_id,\npurpose='password-reset')
+note right of AuthService
+  Token 生成:
+  - 包含 user_id
+  - 用途: 'password-reset'
+  - 有效期: 1 小時 (3600秒)
+  使用 itsdangerous 簽名
+end note
+
+== Stage 10: 發送密碼重置郵件 ==
+AuthService -> EmailService: send_password_reset_email(\nuser_email=user.email,\nusername=user.username,\ntoken=token)
+activate EmailService
+EmailService -> EmailService: 取得 FRONTEND_URL 配置\nreset_url = frontend_url + \n'/reset-password?token=' + token
+note right of EmailService
+  郵件內容:
+  - 主旨: "[App] 重置密碼"
+  - 重置連結: 
+    http://localhost:5173/reset-password?token=xxx
+  - 有效期: 1 小時
+end note
+
+EmailService -> EmailService: 組裝郵件內容\n主旨: "[App] 重置密碼"\nBody: 重置連結 + token
+EmailService -> EmailService: _send_via_smtp(\nsubject, user_email, body)
+note right of EmailService
+  透過 SMTP 發送郵件
+  (或 console 輸出)
+end note
+EmailService --> AuthService: return True (郵件已發送)
+deactivate EmailService
+
+== Stage 11: 返回成功 ==
+AuthService --> AuthBlueprint: return True
+deactivate AuthService
+AuthBlueprint --> APIClient: 200 OK\n{ "message": "如果該 email 存在，\n密碼重置郵件已發送" }
+deactivate AuthBlueprint
+APIClient --> ForgotPasswordPage: 返回成功響應
+deactivate APIClient
+
+== Stage 12: 顯示成功訊息 ==
+ForgotPasswordPage -> ForgotPasswordPage: success = true
+ForgotPasswordPage -> ForgotPasswordPage: loading = false
+ForgotPasswordPage -> ForgotPasswordPage: 隱藏表單，顯示成功訊息區塊
+ForgotPasswordPage --> RegisteredUser: 顯示綠色成功訊息:\n「郵件已發送」\n「如果該 email 存在於系統中，\n您將收到密碼重置連結」\n「請檢查您的郵箱（包括垃圾郵件）」
+note right of ForgotPasswordPage
+  用戶體驗:
+  - 提供返回登入頁面連結
+  - 成功訊息保持中立
+    (不透露 email 是否存在)
+end note
+
+== Stage 13: 使用者檢查郵箱 ==
+RegisteredUser -> RegisteredUser: 檢查郵箱 (包括垃圾郵件資料夾)
+note right of RegisteredUser
+  郵件內容:
+  - 重置連結 (含 token)
+  - 有效期提醒: 1 小時
+  點選連結進入重置密碼頁面
+  (使用案例 7.3.1)
+end note
+
+== Stage 14: 錯誤處理 ==
+alt 網路錯誤或後端錯誤
+  APIClient --> ForgotPasswordPage: 拋出錯誤 (500 等)
+  ForgotPasswordPage -> ForgotPasswordPage: error = "發送失敗，請稍後再試"
+  ForgotPasswordPage -> ForgotPasswordPage: loading = false
+  ForgotPasswordPage --> RegisteredUser: 顯示紅色錯誤訊息
+  deactivate RegisteredUser
+end
+
+deactivate ForgotPasswordPage
+
+note over RegisteredUser, Database
+  **安全機制:**
+  1. 總是返回成功訊息 (不暴露 email 存在性)
+  2. Token 有效期 1 小時 (max_age=3600)
+  3. Token 單次使用 (重置後失效)
+  4. 24 小時內最多請求 5 次 (防止濫用) - 需實作
+  5. 郵件中包含安全提示
+  
+  **後續流程:**
+  使用者點選郵件連結 → 進入 ResetPassword.vue
+  → 輸入新密碼 → POST /auth/reset-password
+  → 驗證 token → 更新密碼 → 重置失敗登入次數
+  → 記錄審計日誌 → 完成重置
+  
+  **資料變更:**
+  - 無資料庫變更 (僅發送郵件)
+  - Token 存在於 JWT 簽名中 (無需存儲)
+  
+  **相關使用案例:**
+  - 7.3.1: 重置密碼 (輸入新密碼)
+  - 7.2: 使用者登入 (重置後使用新密碼登入)
+end note
+
+@enduml

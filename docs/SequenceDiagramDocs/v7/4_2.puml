@@ -1,20 +1,380 @@
-@startuml
-title Use Case 4.2: Medical Record View
-actor User
-participant AnimalDetail.vue
-participant medicalRecords.ts
-participant medical_records.py
-participant medical_record_service.py
-database MySQL
+﻿@startuml 使用案例4_2: 醫療紀錄檢視
+title 使用案例4.2: 醫療紀錄檢視
 
-User -> AnimalDetail.vue: View animal detail
-AnimalDetail.vue -> medicalRecords.ts: getMedicalRecords(animal_id)
-medicalRecords.ts -> medical_records.py: GET /animals/{id}/medical-records
-medical_records.py -> medical_record_service.py: list_medical_records()
-medical_record_service.py -> MySQL: SELECT medical_records WHERE animal_id
-MySQL --> medical_record_service.py: records[]
-medical_record_service.py --> medical_records.py: records
-medical_records.py --> medicalRecords.ts: 200 OK
-medicalRecords.ts --> AnimalDetail.vue: records
-AnimalDetail.vue --> User: Display medical history
+actor "使用者" as User
+participant "AnimalDetail.vue" as AnimalDetailPage
+participant "medicalRecords.ts" as MedicalRecordsAPI
+participant "medical_records.py(blueprint)" as MedicalRecordsBlueprint
+participant "medical_record_service.py" as MedicalRecordService
+participant "medical_record.py(model)" as MedicalRecordModel
+participant "animal.py(model)" as AnimalModel
+participant "others.py(Attachment)(model)" as AttachmentModel
+database "MySQL" as DB
+
+note over User, DB
+  **前置條件:**
+  使用者正在檢視動物詳情頁面 (使用案例 1.3)
+  動物資料已載入完成
+end note
+
+== 1. 進入動物詳情頁面 ==
+User -> AnimalDetailPage: 訪問 /animals/{id}
+activate AnimalDetailPage
+AnimalDetailPage -> AnimalDetailPage: onMounted()\\n載入動物資料
+note right
+  參考使用案例 1.3:
+  - 載入動物基本資料
+  - 載入動物圖片
+  - 載入送養者資訊
+end note
+
+AnimalDetailPage -> AnimalDetailPage: 動物資料載入成功
+AnimalDetailPage -> AnimalDetailPage: loadMedicalRecords(animal_id)
+note right
+  在動物詳情頁面中
+  自動載入該動物的醫療記錄
+end note
+AnimalDetailPage --> User: 顯示動物基本資料
+deactivate AnimalDetailPage
+
+== 2. 載入醫療記錄列表 ==
+AnimalDetailPage -> AnimalDetailPage: isLoadingMedical = true
+activate AnimalDetailPage
+AnimalDetailPage -> MedicalRecordsAPI: getMedicalRecords(animal_id)
+activate MedicalRecordsAPI
+note right
+  前端 API 呼叫:
+  GET /medical-records/animals/{id}/medical-records
+  無需 JWT (公開端點)
+end note
+MedicalRecordsAPI -> MedicalRecordsBlueprint: GET /medical-records/animals/{id}/medical-records
+activate MedicalRecordsBlueprint
+
+MedicalRecordsBlueprint -> MedicalRecordService: list_animal_medical_records(animal_id)
+activate MedicalRecordService
+
+== 3. 驗證動物存在 ==
+MedicalRecordService -> AnimalModel: Animal.query.filter_by(animal_id, deleted_at=None).first()
+activate AnimalModel
+AnimalModel -> DB: SELECT * FROM animals\\nWHERE animal_id=?\\nAND deleted_at IS NULL
+activate DB
+DB --> AnimalModel: animal 資料
+deactivate DB
+AnimalModel --> MedicalRecordService: Animal 物件
+deactivate AnimalModel
+
+alt 動物不存在
+  MedicalRecordService --> MedicalRecordsBlueprint: NotFoundError('動物不存在')
+  MedicalRecordsBlueprint --> MedicalRecordsAPI: 404 Not Found
+  MedicalRecordsAPI --> AnimalDetailPage: 錯誤訊息
+  AnimalDetailPage -> AnimalDetailPage: medicalError = '動物不存在'
+  AnimalDetailPage --> User: 顯示錯誤訊息
+  note right: 終止流程
+end
+
+== 4. 查詢醫療記錄 ==
+MedicalRecordService -> MedicalRecordModel: MedicalRecord.query.filter_by(animal_id, deleted_at=None)
+activate MedicalRecordModel
+note right
+  查詢條件:
+  - animal_id = 指定動物
+  - deleted_at IS NULL (未刪除)
+  - ORDER BY date DESC (最新記錄在前)
+end note
+MedicalRecordModel -> DB: SELECT * FROM medical_records\\nWHERE animal_id=?\\nAND deleted_at IS NULL\\nORDER BY date DESC
+activate DB
+note right
+  排序邏輯:
+  - Backend: ORDER BY date DESC
+  - Frontend 再次排序處理 date 為空的情況
+  - 若 date 為空,使用 created_at
+end note
+DB --> MedicalRecordModel: medical_records[]
+deactivate DB
+MedicalRecordModel --> MedicalRecordService: MedicalRecord 列表
+deactivate MedicalRecordModel
+
+== 5. 載入附件資訊 ==
+loop 每筆醫療記錄
+  MedicalRecordService -> MedicalRecordModel: medical_record.to_dict()
+  activate MedicalRecordModel
+  note right
+    序列化醫療記錄並
+    載入關聯的附件資訊
+  end note
+  
+  MedicalRecordModel -> AttachmentModel: 查詢關聯附件
+  activate AttachmentModel
+  AttachmentModel -> DB: SELECT * FROM attachments\\nWHERE owner_type='medical_record'\\nAND owner_id=?\\nAND deleted_at IS NULL
+  activate DB
+  note right
+    載入醫療證明附件:
+    - 圖片 (JPG, PNG, GIF)
+    - 文件 (PDF)
+    - 包含 URL、檔名、大小
+  end note
+  DB --> AttachmentModel: attachments[]
+  deactivate DB
+  AttachmentModel --> MedicalRecordModel: Attachment 列表
+  deactivate AttachmentModel
+  
+  MedicalRecordModel --> MedicalRecordService: {medical_record_id, record_type, date, provider, details, attachments[], verified, ...}
+  deactivate MedicalRecordModel
+end
+
+MedicalRecordService --> MedicalRecordsBlueprint: medical_records[]
+deactivate MedicalRecordService
+
+MedicalRecordsBlueprint -> MedicalRecordsBlueprint: 序列化回應資料
+note right
+  回應格式:
+  {
+    total: 記錄總數,
+    medical_records: [
+      {
+        medical_record_id,
+        animal_id,
+        record_type,
+        date,
+        provider,
+        details,
+        attachments: [{url, filename, ...}],
+        verified,
+        created_at,
+        updated_at
+      }
+    ]
+  }
+end note
+
+MedicalRecordsBlueprint --> MedicalRecordsAPI: 200 OK + {total, medical_records[]}
+deactivate MedicalRecordsBlueprint
+MedicalRecordsAPI --> AnimalDetailPage: 醫療記錄列表
+deactivate MedicalRecordsAPI
+
+== 6. 前端處理與顯示 ==
+AnimalDetailPage -> AnimalDetailPage: medicalRecords = response.medical_records
+AnimalDetailPage -> AnimalDetailPage: isLoadingMedical = false
+AnimalDetailPage -> AnimalDetailPage: 前端重新排序醫療記錄
+note right
+  前端排序邏輯:
+  - sortedMedicalRecords computed
+  - 若 date 存在: 使用 date
+  - 若 date 為空: 使用 created_at
+  - 降序排列 (最新在前)
+  
+  為何前端重排?
+  - Backend 僅 ORDER BY date DESC
+  - 前端處理 date=null 的記錄
+  - 確保顯示順序正確
+end note
+
+AnimalDetailPage -> AnimalDetailPage: 決定顯示筆數
+note right
+  顯示邏輯:
+  - 預設顯示前 3 筆
+  - 超過 3 筆顯示「顯示更多」按鈕
+  - 使用者可展開查看全部
+  - displayedMedicalRecords computed
+end note
+
+AnimalDetailPage --> User: 顯示醫療記錄區塊
+deactivate AnimalDetailPage
+
+== 7. 檢視醫療記錄詳情 ==
+User -> AnimalDetailPage: 瀏覽醫療記錄列表
+activate AnimalDetailPage
+
+loop 每筆醫療記錄
+  AnimalDetailPage -> AnimalDetailPage: 渲染醫療記錄卡片
+  note right
+    顯示內容:
+    - 紀錄類型徽章 (治療/健檢/疫苗/手術/其他)
+    - 驗證狀態標示 (已驗證✓/未驗證)
+    - 紀錄日期 (formatMedicalDate)
+    - 醫療提供者
+    - 詳細說明
+    - 附件預覽 (如有)
+  end note
+  
+  AnimalDetailPage -> AnimalDetailPage: 根據類型設定樣式
+  note right
+    類型樣式:
+    - TREATMENT: 藍色 (治療)
+    - CHECKUP: 綠色 (健檢)
+    - VACCINE: 黃色 (疫苗)
+    - SURGERY: 紅色 (手術)
+    - OTHER: 灰色 (其他)
+  end note
+  
+  AnimalDetailPage -> AnimalDetailPage: 顯示驗證狀態
+  note right
+    驗證狀態:
+    - verified = true: 綠色勾號 + 「已驗證」
+    - verified = false: 灰色問號 + 「未驗證」
+  end note
+end
+
+AnimalDetailPage --> User: 顯示格式化的醫療記錄清單
+deactivate AnimalDetailPage
+
+== 8. 展開查看更多記錄 ==
+opt 醫療記錄超過 3 筆
+  User -> AnimalDetailPage: 點擊「顯示更多」按鈕
+  activate AnimalDetailPage
+  AnimalDetailPage -> AnimalDetailPage: showAllMedicalRecords = true
+  AnimalDetailPage -> AnimalDetailPage: 重新計算 displayedMedicalRecords
+  note right
+    展開後:
+    - 顯示所有醫療記錄
+    - 按鈕文字變為「收起 (N 筆)」
+    - 圖示旋轉 180 度
+  end note
+  AnimalDetailPage --> User: 顯示完整醫療記錄列表
+  deactivate AnimalDetailPage
+  
+  User -> AnimalDetailPage: 點擊「收起」按鈕
+  activate AnimalDetailPage
+  AnimalDetailPage -> AnimalDetailPage: showAllMedicalRecords = false
+  AnimalDetailPage -> AnimalDetailPage: 重新計算 displayedMedicalRecords
+  note right
+    收起後:
+    - 僅顯示前 3 筆
+    - 按鈕文字恢復「顯示更多 (N 筆)」
+  end note
+  AnimalDetailPage --> User: 顯示摺疊後的醫療記錄
+  deactivate AnimalDetailPage
+end
+
+== 9. 檢視附件 ==
+opt 醫療記錄包含附件
+  User -> AnimalDetailPage: 點擊附件預覽
+  activate AnimalDetailPage
+  AnimalDetailPage -> AnimalDetailPage: 開啟附件檢視器
+  note right
+    附件檢視:
+    - 圖片: 顯示圖片預覽
+    - PDF: 開啟新分頁或下載
+    - 附件來源: MinIO storage_key
+  end note
+  AnimalDetailPage --> User: 顯示附件內容
+  deactivate AnimalDetailPage
+end
+
+== 10. 權限與可見性控制 ==
+note over AnimalDetailPage, DB
+  **權限說明:**
+  
+  目前實作為公開端點 (無 JWT 驗證):
+  - 所有使用者可檢視所有醫療記錄
+  - 包含已驗證和未驗證記錄
+  
+  **使用案例文件要求的權限邏輯:**
+  1. 一般訪客: 僅能檢視已驗證記錄 (verified=true)
+  2. 動物擁有者: 可檢視所有記錄 (包括未驗證)
+  3. 管理員: 可檢視所有記錄
+  
+  **未來改進建議:**
+  - 在 Blueprint 加入權限檢查
+  - 根據使用者角色過濾記錄
+  - 訪客模式僅顯示 verified=true
+end note
+
+== 11. 醫療記錄摘要顯示 ==
+opt 動物有 medical_summary 欄位
+  AnimalDetailPage -> AnimalDetailPage: 檢查 animal.medical_summary
+  activate AnimalDetailPage
+  note right
+    醫療摘要:
+    - 動物表格的 medical_summary 欄位
+    - 由管理者手動填寫的摘要
+    - 顯示在詳細記錄之前
+  end note
+  
+  alt 有醫療摘要
+    AnimalDetailPage --> User: 顯示醫療摘要文字
+  end
+  deactivate AnimalDetailPage
+end
+
+== 12. 錯誤處理 ==
+opt 載入失敗情境
+  alt 動物不存在 (404)
+    AnimalDetailPage -> MedicalRecordsAPI: getMedicalRecords(invalid_id)
+    activate AnimalDetailPage
+    activate MedicalRecordsAPI
+    MedicalRecordsAPI --> AnimalDetailPage: 404 Not Found
+    deactivate MedicalRecordsAPI
+    AnimalDetailPage -> AnimalDetailPage: medicalError = '動物不存在'
+    AnimalDetailPage --> User: 顯示錯誤訊息區塊
+    deactivate AnimalDetailPage
+  else 網路錯誤 (500)
+    AnimalDetailPage -> MedicalRecordsAPI: getMedicalRecords(id)
+    activate AnimalDetailPage
+    activate MedicalRecordsAPI
+    MedicalRecordsAPI --> AnimalDetailPage: 500 Internal Server Error
+    deactivate MedicalRecordsAPI
+    AnimalDetailPage -> AnimalDetailPage: medicalError = '載入醫療記錄失敗'
+    AnimalDetailPage --> User: 顯示錯誤訊息
+    deactivate AnimalDetailPage
+  else 無醫療記錄
+    AnimalDetailPage -> AnimalDetailPage: medicalRecords.length === 0
+    activate AnimalDetailPage
+    AnimalDetailPage --> User: 顯示「尚無醫療記錄」提示
+    deactivate AnimalDetailPage
+  end
+end
+
+note over User, DB
+  **後置條件:**
+  1. 醫療記錄已成功載入並顯示
+  2. 記錄按日期降序排列 (最新在前)
+  3. 附件資訊已包含在記錄中
+  4. 使用者可展開/收起記錄列表
+  5. 驗證狀態清楚標示
+  
+  **顯示規則:**
+  - Backend: ORDER BY date DESC
+  - Frontend: 若 date 為空則使用 created_at
+  - 降序排列 (最新在前)
+  - 前端 computed 重新排序確保正確順序
+  
+  **排序邏輯:**
+  - 優先使用 date 欄位排序
+  - 若 date 為空，使用 created_at
+  - 降序排列 (最新在前)
+  - ORDER BY date DESC, created_at DESC
+  
+  **附件處理:**
+  - 自動載入 Attachment 記錄
+  - owner_type='medical_record'
+  - 包含 URL、檔名、mime_type、大小
+  - 支援圖片預覽和文件下載
+  
+  **驗證狀態:**
+  - verified=true: 已驗證 (綠色勾號)
+  - verified=false: 未驗證 (灰色問號)
+  - 僅管理員可驗證記錄 (使用案例 4.3)
+  
+  **類型標示:**
+  - TREATMENT: 治療 (藍色)
+  - CHECKUP: 健康檢查 (綠色)
+  - VACCINE: 疫苗接種 (黃色)
+  - SURGERY: 手術 (紅色)
+  - OTHER: 其他 (灰色)
+  
+  **使用情境:**
+  - 領養者評估動物健康狀況
+  - 檢視疫苗接種記錄
+  - 了解醫療歷史
+  - 評估領養風險
+  - 送養者展示動物健康狀態
+  
+  **權限考量 (未來改進):**
+  - 目前: 公開端點，所有人可見所有記錄
+  - 建議: 訪客僅可見已驗證記錄
+  - 建議: 動物擁有者可見所有記錄
+  - 建議: 管理員可見所有記錄
+end note
+
 @enduml

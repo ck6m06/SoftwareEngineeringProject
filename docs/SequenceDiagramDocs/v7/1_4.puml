@@ -1,23 +1,352 @@
-@startuml
-title Use Case 1.4: Application Submit
-actor User
-participant AnimalDetail.vue  
-participant applications.ts
-participant applications.py
-participant application_service.py
-participant notification_service.py
-database MySQL
+@startuml 使用案例1_4_領養申請提交
+title 使用案例1.4: 領養申請提交流程
 
-User -> AnimalDetail.vue: Click Apply
-AnimalDetail.vue -> applications.ts: createApplication()
-applications.ts -> applications.py: POST /applications
-applications.py -> application_service.py: create_application()
-application_service.py -> MySQL: INSERT application
-MySQL --> application_service.py: application_id
-application_service.py -> notification_service.py: notify_owner()
-notification_service.py -> MySQL: INSERT notification
-application_service.py --> applications.py: application
-applications.py --> applications.ts: 201 Created
-applications.ts -> AnimalDetail.vue: success
-AnimalDetail.vue --> User: Success message
+actor "一般會員" as User
+participant "AnimalDetail.vue" as DetailPage
+participant "applications.ts" as ApplicationAPI
+participant "applications.py(blueprint)" as ApplicationBlueprint
+participant "application_service.py" as ApplicationService
+participant "notification_service.py" as NotificationService
+participant "application.py(model)" as ApplicationModel
+participant "animal.py(model)" as AnimalModel
+participant "user.py(model)" as UserModel
+participant "shelter.py(model)" as ShelterModel
+participant "others.py(Notification)(model)" as NotificationModel
+database "MySQL" as DB
+
+== 1. 前置準備 - 檢視動物詳情 ==
+User -> DetailPage: 在動物詳情頁面
+activate DetailPage
+DetailPage -> DetailPage: 檢查使用者狀態
+alt 使用者已登入且為一般會員
+    DetailPage -> DetailPage: 顯示「我想領養」按鈕
+    DetailPage --> User: 顯示申請按鈕
+else 使用者未登入
+    DetailPage -> DetailPage: 顯示「登入以領養」按鈕
+    DetailPage --> User: 提示需登入
+else 動物已被領養(ADOPTED)
+    DetailPage -> DetailPage: 隱藏申請按鈕
+    DetailPage --> User: 顯示「已被領養」標籤
+end
+note right
+  注意: 前端不檢查「已有待審核申請」
+  此檢查由後端 Stage 6 執行
+end note
+deactivate DetailPage
+
+== 2. 開啟申請表單 ==
+User -> DetailPage: 點擊「我想領養」按鈕
+activate DetailPage
+DetailPage -> DetailPage: handleApply()
+DetailPage -> DetailPage: 前端驗證:\n- 檢查是否為一般會員\n- 檢查是否為自己的動物
+alt 驗證失敗
+    DetailPage --> User: 顯示錯誤訊息
+    deactivate DetailPage
+else 驗證通過
+    DetailPage -> DetailPage: 重置表單資料
+    DetailPage -> DetailPage: 顯示申請表單對話框
+    DetailPage --> User: 顯示申請表單
+    deactivate DetailPage
+end
+
+== 3. 填寫申請資訊 ==
+User -> DetailPage: 填寫申請資訊
+activate DetailPage
+note right
+  必填欄位:
+  - 申請類型(領養/中途送養)
+  - 聯絡電話
+  - 聯絡地址
+  - 職業
+  - 居住環境
+  - 是否有經驗
+  - 申請原因
+  
+  選填欄位:
+  - 備註
+  
+  注意: 前端無即時驗證
+  僅在提交時檢查 agreeTerms
+end note
+
+opt 使用者取消申請
+    User -> DetailPage: 點擊「取消」或關閉對話框
+    DetailPage -> DetailPage: closeApplicationModal()
+    DetailPage --> User: 關閉對話框,回到動物詳情頁
+    note right
+      替代流程:
+      系統不儲存資料
+      直接返回詳情頁
+    end note
+    deactivate DetailPage
+end
+
+== 4. 提交申請 ==
+User -> DetailPage: 勾選同意條款
+User -> DetailPage: 點擊「提交申請」
+DetailPage -> DetailPage: submitApplication()
+DetailPage -> DetailPage: 生成 Idempotency-Key\nkey = "apply-{animal_id}-{timestamp}"
+
+note right
+  冪等性機制:
+  使用 Idempotency-Key
+  防止重複提交
+end note
+
+DetailPage -> ApplicationAPI: createApplication(data, idempotencyKey)
+activate ApplicationAPI
+ApplicationAPI -> ApplicationBlueprint: POST /applications\nHeader: Idempotency-Key
+activate ApplicationBlueprint
+
+== 5. 後端驗證與檢查 ==
+ApplicationBlueprint -> ApplicationService: create_application(applicant, data, idempotency_key)
+activate ApplicationService
+
+ApplicationService -> ApplicationService: 權限檢查\n只有一般會員可申請
+ApplicationService -> ApplicationService: 驗證必填欄位 (animal_id)
+
+ApplicationService -> AnimalModel: Animal.query.filter_by(\nanimal_id=:id, deleted_at=None).first()
+activate AnimalModel
+AnimalModel -> DB: SELECT * FROM animals\nWHERE animal_id = :id\nAND deleted_at IS NULL
+activate DB
+DB --> AnimalModel: 動物資料
+deactivate DB
+AnimalModel --> ApplicationService: Animal 物件
+deactivate AnimalModel
+
+ApplicationService -> ApplicationService: 檢查動物狀態\n(status == PUBLISHED)
+alt 動物已被領養
+    ApplicationService --> ApplicationBlueprint: ValidationError:\n「此動物已被領養」
+    ApplicationBlueprint --> ApplicationAPI: 400 Bad Request
+    ApplicationAPI --> DetailPage: 錯誤訊息
+    DetailPage --> User: 顯示錯誤
+else 動物狀態非PUBLISHED
+    ApplicationService --> ApplicationBlueprint: ValidationError:\n「此動物目前無法申請領養」
+    ApplicationBlueprint --> ApplicationAPI: 400 Bad Request
+    ApplicationAPI --> DetailPage: 錯誤訊息
+    DetailPage --> User: 顯示錯誤
+else 申請人是刊登者本人
+    ApplicationService --> ApplicationBlueprint: ValidationError:\n「不能申請自己刊登的動物」
+    ApplicationBlueprint --> ApplicationAPI: 400 Bad Request
+    ApplicationAPI --> DetailPage: 錯誤訊息
+    DetailPage --> User: 顯示錯誤
+end
+
+== 6. 冪等性與重複檢查 ==
+note right of ApplicationService
+  冪等性檢查優先執行
+  避免重複檢查的 409 錯誤
+  
+  ⚠️ 實際代碼問題:
+  冪等性檢查在代碼中出現兩次
+  (line 191 和 line 227)
+  第二次檢查是多餘的
+end note
+
+ApplicationService -> ApplicationModel: Application.query.filter_by(\nidempotency_key=:key,\napplicant_id=:applicant_id).first()
+activate ApplicationModel
+ApplicationModel -> DB: SELECT * FROM applications\nWHERE idempotency_key = :key\nAND applicant_id = :applicant_id
+activate DB
+alt 找到相同冪等性鍵值
+    DB --> ApplicationModel: 既有申請記錄
+    deactivate DB
+    ApplicationModel --> ApplicationService: Application 物件
+    deactivate ApplicationModel
+    ApplicationService --> ApplicationBlueprint: 返回既有申請
+    note right
+      冪等性保護:
+      相同請求返回相同結果
+      避免重複創建
+    end note
+    ApplicationBlueprint --> ApplicationAPI: 201 Created (既有記錄)
+    ApplicationAPI --> DetailPage: 申請成功
+    DetailPage --> User: 顯示成功訊息
+else 無相同冪等性鍵值
+    DB --> ApplicationModel: 無記錄
+    deactivate DB
+    ApplicationModel --> ApplicationService: None
+    deactivate ApplicationModel
+end
+
+ApplicationService -> ApplicationModel: Application.query.filter_by(\nanimal_id=:id, applicant_id=:id,\ndeleted_at=None).filter(\nstatus.in_([PENDING, UNDER_REVIEW, APPROVED]))
+activate ApplicationModel
+ApplicationModel -> DB: SELECT * FROM applications\nWHERE animal_id = :animal_id\nAND applicant_id = :applicant_id\nAND deleted_at IS NULL\nAND status IN ('PENDING', 'UNDER_REVIEW', 'APPROVED')
+activate DB
+alt 已有進行中的申請
+    DB --> ApplicationModel: 既有申請
+    deactivate DB
+    ApplicationModel --> ApplicationService: Application 物件
+    deactivate ApplicationModel
+    ApplicationService --> ApplicationBlueprint: ConflictError:\n「您已對此動物提交申請」
+    ApplicationBlueprint --> ApplicationAPI: 409 Conflict
+    ApplicationAPI --> DetailPage: 衝突錯誤
+    DetailPage --> User: 顯示錯誤並導向我的申請
+else 無進行中的申請
+    DB --> ApplicationModel: 無衝突
+    deactivate DB
+    ApplicationModel --> ApplicationService: None
+    deactivate ApplicationModel
+end
+
+ApplicationService -> ApplicationModel: Application.query.filter_by(\nanimal_id=:id, deleted_at=None).filter(\nstatus.in_([PENDING, UNDER_REVIEW]))
+activate ApplicationModel
+ApplicationModel -> DB: SELECT * FROM applications\nWHERE animal_id = :animal_id\nAND deleted_at IS NULL\nAND status IN ('PENDING', 'UNDER_REVIEW')
+activate DB
+alt 該動物有其他人的待審核申請
+    DB --> ApplicationModel: 有待審核申請
+    deactivate DB
+    ApplicationModel --> ApplicationService: Application 物件
+    deactivate ApplicationModel
+    ApplicationService --> ApplicationBlueprint: ConflictError:\n「此動物目前有待審核的申請,請等待審核結果後再提出申請」
+    ApplicationBlueprint --> ApplicationAPI: 409 Conflict
+    ApplicationAPI --> DetailPage: 衝突錯誤
+    DetailPage --> User: 顯示錯誤訊息
+else 該動物無待審核申請
+    DB --> ApplicationModel: 無待審核申請
+    deactivate DB
+    ApplicationModel --> ApplicationService: None
+    deactivate ApplicationModel
+end
+
+== 7. 創建申請記錄 ==
+ApplicationService -> DB: SELECT MAX(application_id)\nFROM applications
+activate DB
+note right
+  SQLite 相容性處理:
+  手動分配 application_id
+  
+  原因: SQLite 不支援 BIGINT autoincrement
+  需手動計算 next_id = (max_id or 0) + 1
+end note
+DB --> ApplicationService: max_id
+deactivate DB
+
+ApplicationService -> ApplicationService: 組裝 Application 物件\nnext_id = max_id + 1\nstatus = PENDING\nsubmitted_at = NOW()\nidempotency_key = :key
+
+ApplicationService -> ApplicationModel: 創建 Application 實例
+activate ApplicationModel
+ApplicationModel -> DB: INSERT INTO applications\n(application_id, animal_id, applicant_id,\ntype, status, contact_phone, contact_address,\noccupation, housing_type, has_experience,\nreason, notes, idempotency_key, ...)\nVALUES (...)
+activate DB
+DB --> ApplicationModel: 插入成功
+deactivate DB
+ApplicationModel --> ApplicationService: Application 物件
+deactivate ApplicationModel
+
+ApplicationService -> DB: COMMIT
+activate DB
+DB --> ApplicationService: 提交成功
+deactivate DB
+
+== 8. 發送通知 ==
+ApplicationService -> NotificationService: notify_application_submitted(\napplication, applicant_name, animal_name)
+activate NotificationService
+
+NotificationService -> AnimalModel: Animal.query.get(animal_id)
+activate AnimalModel
+AnimalModel -> DB: SELECT * FROM animals\nWHERE animal_id = :id
+activate DB
+DB --> AnimalModel: 動物資料
+deactivate DB
+AnimalModel --> NotificationService: Animal 物件
+deactivate AnimalModel
+
+NotificationService -> NotificationService: 確定接收者 ID\nrecipient_id = animal.owner_id
+
+opt owner_id 不存在且 shelter_id 存在
+    NotificationService -> ShelterModel: Shelter.query.get(shelter_id)
+    activate ShelterModel
+    ShelterModel -> DB: SELECT * FROM shelters\nWHERE shelter_id = :id
+    activate DB
+    DB --> ShelterModel: 收容所資料
+    deactivate DB
+    ShelterModel --> NotificationService: Shelter 物件
+    deactivate ShelterModel
+    NotificationService -> NotificationService: recipient_id = shelter.primary_account_user_id
+end
+note right
+  順序判斷邏輯:
+  1. 優先使用 animal.owner_id
+  2. 若 owner_id 為 None
+     才查詢 shelter.primary_account_user_id
+end note
+
+NotificationService -> NotificationService: 組裝通知 payload\n{application_id, animal_id, applicant_name, ...}
+
+NotificationService -> NotificationModel: NotificationService.create(\nrecipient_id, type, actor_id, payload)
+activate NotificationModel
+NotificationModel -> DB: INSERT INTO notifications\n(user_id, type, actor_id, payload,\ntitle, message, ...)\nVALUES (...)
+activate DB
+note right
+  通知內容:
+  「{applicant_name} 對您的動物
+  {animal_name} 提出了領養申請」
+  
+  通知類型:
+  application_submitted
+end note
+DB --> NotificationModel: 通知已創建
+deactivate DB
+NotificationModel --> NotificationService: Notification 物件
+deactivate NotificationModel
+
+NotificationService --> ApplicationService: 通知發送成功
+deactivate NotificationService
+
+note right
+  通知失敗不影響主流程
+  僅記錄錯誤日誌
+end note
+
+== 9. 返回結果 ==
+ApplicationService --> ApplicationBlueprint: 返回申請物件
+deactivate ApplicationService
+ApplicationBlueprint --> ApplicationAPI: 201 Created\n{message, application}
+deactivate ApplicationBlueprint
+ApplicationAPI --> DetailPage: 申請成功
+deactivate ApplicationAPI
+
+== 10. 顯示成功與導向 ==
+DetailPage -> DetailPage: 關閉申請對話框
+
+alt 提交成功
+    DetailPage -> DetailPage: 顯示成功提示\n「申請已提交!送養人將會審核您的申請」
+    DetailPage -> DetailPage: router.push('/my/applications')
+    DetailPage --> User: 立即導向「我的申請」頁面
+else 錯誤 409/500 (重複申請)
+    DetailPage -> DetailPage: 顯示錯誤訊息\n「您已經對此動物提交過申請了"
+    DetailPage -> DetailPage: setTimeout(() => \n  router.push('/my/applications')\n, 3000)
+    DetailPage --> User: 顯示錯誤後 3 秒自動跳轉
+    note right
+      前端特殊處理:
+      檢測錯誤訊息包含
+      "已對此動物提交申請"
+      或 "已提交" 或 "重複"
+    end note
+end
+deactivate DetailPage
+
+note over User, DB
+  **後置條件:**
+  1. 申請記錄已存入資料庫(status=PENDING)
+  2. 送養者收到通知
+  3. 申請人被導向「我的申請」頁面
+  4. 動物狀態暫不改變(仍為PUBLISHED)
+  
+  **業務規則:**
+  - 僅一般會員可提出申請
+  - 不能申請自己的動物
+  - 每個動物同時只能有一個待審核申請
+  - 每位使用者對同一動物只能有一個進行中的申請
+  - 使用冪等性鍵值防止重複提交
+  
+  **錯誤處理:**
+  - 400: 驗證失敗(狀態不符、權限不足等)
+  - 409: 衝突(重複申請、已有待審核申請)
+  - 500: 系統錯誤
+  
+  **通知機制:**
+  - 申請提交後立即通知送養者
+  - 通知失敗不影響申請創建
+end note
+
 @enduml

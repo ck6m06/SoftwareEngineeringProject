@@ -1,0 +1,559 @@
+@startuml 使用案例5_2: 資料審核
+title 使用案例5.2: 資料審核流程
+
+actor 管理員 as Admin
+participant "AdminDashboard.vue" as Dashboard
+participant "AuditLogs.vue" as AuditLogs
+participant "animals.ts" as API
+participant "animals.py\n(blueprint)" as Blueprint
+participant "admin.py" as AdminBlueprint
+participant "animal_service.py" as Service
+participant "admin_service.py" as AdminService
+participant "permission_service.py" as Permission
+participant "audit_service.py" as AuditService
+participant "notification_service.py" as NotificationService
+participant "animal.py(model)" as AnimalModel
+participant "user.py(model)" as UserModel
+participant "others.py(Notification)(model)" as NotificationModel
+participant "others.py(AuditLog)(model)" as AuditLogModel
+database "MySQL" as DB
+
+== Stage 1: 進入管理後台 ==
+Admin -> Dashboard: 訪問 /admin/dashboard
+activate Dashboard
+Dashboard -> Dashboard: 初始化頁面狀態\n(currentStatus = 'SUBMITTED')
+
+== Stage 2: 載入統計資料 ==
+Dashboard -> API: 並行請求各狀態動物數量\ngetAnimals({status: 'DRAFT/SUBMITTED/PUBLISHED/RETIRED'})
+activate API
+loop 每個狀態 (DRAFT, SUBMITTED, PUBLISHED, RETIRED)
+    API -> Blueprint: GET /animals?status={status}&per_page=1
+    activate Blueprint
+    Blueprint -> Service: list_animals(status=status, per_page=1)
+    activate Service
+    Service -> AnimalModel: 查詢動物數量
+    activate AnimalModel
+    AnimalModel -> DB: SELECT COUNT(*) FROM animals WHERE status=? AND deleted_at IS NULL
+    activate DB
+    DB --> AnimalModel: count
+    deactivate DB
+    AnimalModel --> Service: count
+    deactivate AnimalModel
+    Service --> Blueprint: {total: count}
+    deactivate Service
+    Blueprint --> API: 200 OK {total}
+    deactivate Blueprint
+end
+API --> Dashboard: {draft: X, submitted: Y, published: Z, retired: W}
+deactivate API
+Dashboard -> Dashboard: 顯示統計卡片
+
+== Stage 3: 載入待審核動物列表 ==
+Dashboard -> API: getAnimals({status: 'SUBMITTED', page: 1, per_page: 20})
+activate API
+API -> Blueprint: GET /animals?status=SUBMITTED&page=1&per_page=20
+activate Blueprint
+
+== Stage 4: 驗證管理員權限 ==
+Blueprint -> Blueprint: @jwt_required() 驗證 JWT token
+Blueprint -> Blueprint: 從 token 取得 current_user
+Blueprint -> UserModel: 查詢用戶
+activate UserModel
+UserModel -> DB: SELECT * FROM users WHERE user_id=?
+activate DB
+DB --> UserModel: user record
+deactivate DB
+UserModel --> Blueprint: user (role=ADMIN)
+deactivate UserModel
+
+note over Blueprint
+若非 ADMIN 角色，某些操作將受限
+但列表查詢對所有登入用戶開放
+end note
+
+== Stage 5: 查詢待審核動物 ==
+Blueprint -> Service: list_animals(status='SUBMITTED', page=1, per_page=20)
+activate Service
+Service -> AnimalModel: 查詢待審核動物
+activate AnimalModel
+AnimalModel -> DB: SELECT * FROM animals\nWHERE status='SUBMITTED'\nAND deleted_at IS NULL\nORDER BY created_at DESC\nLIMIT 20 OFFSET 0
+activate DB
+DB --> AnimalModel: animals records
+deactivate DB
+AnimalModel --> Service: animals[] (含 images, owner 關聯)
+deactivate AnimalModel
+
+Service -> Service: 組裝回應資料\n- 計算總頁數\n- 檢查 has_pending_application\n- 包含圖片 URLs
+Service --> Blueprint: {animals[], page, per_page, pages, total}
+deactivate Service
+
+== Stage 6: 回傳動物列表 ==
+Blueprint --> API: 200 OK {animals[], pagination}
+deactivate Blueprint
+API --> Dashboard: animals[], pagination
+deactivate API
+Dashboard -> Dashboard: 渲染動物卡片\n- 顯示名稱、品種、性別、年齡\n- 顯示狀態徽章\n- 顯示建立時間、送養者 ID
+Dashboard --> Admin: 顯示待審核列表 (含核准/拒絕按鈕)
+deactivate Dashboard
+
+== Stage 7: 管理員選擇操作 ==
+note over Admin, Dashboard
+管理員可以：
+1. 單一核准發布
+2. 單一拒絕
+3. 批次選擇動物 (checkbox)
+4. 批次核准發布
+5. 批次拒絕
+6. 查看動物詳情
+7. 篩選不同狀態
+8. 查看審計日誌
+end note
+
+alt 操作 1: 單一核准發布
+
+== Stage 8a: 執行單一核准 ==
+Admin -> Dashboard: 點擊「✓ 核准發布」按鈕
+activate Dashboard
+Dashboard -> API: publishAnimal(animal_id)
+activate API
+API -> Blueprint: PATCH /animals/{animal_id}\nBody: {status: 'PUBLISHED'}
+activate Blueprint
+
+== Stage 9a: 核准權限驗證 ==
+Blueprint -> Blueprint: @jwt_required() 驗證
+Blueprint -> Permission: can_manage_animal(current_user, animal)
+activate Permission
+Permission -> AnimalModel: 查詢動物
+activate AnimalModel
+AnimalModel -> DB: SELECT * FROM animals WHERE animal_id=?
+activate DB
+DB --> AnimalModel: animal record
+deactivate DB
+AnimalModel --> Permission: animal (owner_id, status)
+deactivate AnimalModel
+Permission -> Permission: 檢查: user.role == ADMIN\nOR user.user_id == animal.owner_id
+Permission --> Blueprint: True (管理員可核准任何動物)
+deactivate Permission
+
+== Stage 10a: 更新動物狀態 ==
+Blueprint -> Service: update_animal(animal_id, {'status': 'PUBLISHED'})
+activate Service
+Service -> AnimalModel: 查詢動物
+activate AnimalModel
+AnimalModel -> DB: SELECT * FROM animals WHERE animal_id=? AND deleted_at IS NULL
+activate DB
+DB --> AnimalModel: animal record
+deactivate DB
+AnimalModel --> Service: animal (status='SUBMITTED')
+deactivate AnimalModel
+
+Service -> Service: 驗證狀態轉換\nSUBMITTED → PUBLISHED (合法)
+
+Service -> AnimalModel: 更新狀態為 PUBLISHED
+activate AnimalModel
+AnimalModel -> DB: UPDATE animals\nSET status='PUBLISHED', updated_at=NOW()\nWHERE animal_id=?
+activate DB
+DB --> AnimalModel: success
+deactivate DB
+AnimalModel --> Service: success
+deactivate AnimalModel
+
+Service -> Service: db.session.commit()
+
+== Stage 11a: 記錄審計日誌 ==
+Service -> AuditService: log_action(\nactor_id=admin.user_id,\naction='approve_animal',\ntarget_type='Animal',\ntarget_id=animal_id,\ndetails={'status': 'PUBLISHED'}\n)
+activate AuditService
+AuditService -> AuditLogModel: 記錄審計日誌
+activate AuditLogModel
+AuditLogModel -> DB: INSERT INTO audit_logs\n(actor_id, action, target_type, target_id,\ndetails, ip_address, timestamp)
+activate DB
+DB --> AuditLogModel: audit_log created
+deactivate DB
+AuditLogModel --> AuditService: audit_log created
+deactivate AuditLogModel
+AuditService --> Service: success
+deactivate AuditService
+
+== Stage 12a: 發送核准通知 (TODO: 尚未實現) ==
+Service -> Service: # TODO: 發送通知給動物擁有者
+note right
+  目前尚未實現通知功能
+  計劃實現:
+  - NotificationService.create_notification()
+  - type='animal_approved'
+  - 通知動物擁有者審核通過
+end note
+
+note over Service, NotificationService
+  以下為計劃中的通知流程 (待實現):
+end note
+
+Service -> NotificationService: (TODO) create_notification(\nuser_id=animal.owner_id,\ntype='animal_approved',\ntitle='您的動物刊登已核准',\nmessage='您的動物「{name}」已通過審核並發布',\nrelated_id=animal_id,\nrelated_type='Animal'\n)
+activate NotificationService
+NotificationService -> NotificationModel: (TODO) 建立通知
+activate NotificationModel
+NotificationModel -> DB: (TODO) INSERT INTO notifications\n(user_id, type, title, message,\nrelated_id, related_type, is_read=False)
+activate DB
+DB --> NotificationModel: (TODO) notification record
+deactivate DB
+NotificationModel --> NotificationService: (TODO) notification created
+deactivate NotificationModel
+NotificationService --> Service: (TODO) notification_id
+deactivate NotificationService
+
+Service --> Blueprint: animal (status='PUBLISHED')
+deactivate Service
+Blueprint --> API: 200 OK {animal}
+deactivate Blueprint
+API --> Dashboard: success
+deactivate API
+Dashboard -> Dashboard: 更新列表\n- 從 SUBMITTED 列表移除\n- 更新統計數字
+Dashboard --> Admin: 顯示成功訊息「✓ 核准發布成功」
+deactivate Dashboard
+
+else 操作 2: 單一拒絕
+
+== Stage 8b: 開啟拒絕 Modal ==
+Admin -> Dashboard: 點擊「✗ 拒絕」按鈕
+activate Dashboard
+Dashboard -> Dashboard: openRejectModal(animal_id)\n- 設定 showRejectModal = true\n- 設定 rejectingAnimalId = animal_id\n- 設定 isBatchReject = false\n- 清空 rejectionReason
+Dashboard --> Admin: 顯示拒絕原因 Modal\n- 標題: 「拒絕批准動物上架」\n- textarea: 要求輸入拒絕原因\n- 警告: 「拒絕後動物狀態將改為草稿」
+deactivate Dashboard
+
+Admin -> Dashboard: 輸入拒絕原因並點擊「確認拒絕」
+activate Dashboard
+Dashboard -> Dashboard: 驗證 rejectionReason.trim() 不為空
+
+== Stage 9b: 執行拒絕操作 ==
+Dashboard -> API: rejectAnimal(animal_id, rejection_reason)
+activate API
+API -> Blueprint: POST /animals/{animal_id}/reject\nBody: {rejection_reason: "..."}
+activate Blueprint
+
+== Stage 10b: 拒絕權限驗證 ==
+Blueprint -> Blueprint: @jwt_required() 驗證
+Blueprint -> Permission: can_reject_animal(current_user, animal)
+activate Permission
+Permission -> Permission: 檢查: user.role == ADMIN
+alt user.role != ADMIN
+    Permission --> Blueprint: False
+    Blueprint --> API: 403 Forbidden\n{message: '只有管理員可以拒絕批准'}
+    API --> Dashboard: error
+    Dashboard --> Admin: 顯示錯誤訊息
+else user.role == ADMIN
+    Permission --> Blueprint: True
+    deactivate Permission
+
+== Stage 11b: 執行拒絕業務邏輯 ==
+Blueprint -> Service: reject_animal(animal_id, admin, rejection_reason)
+activate Service
+Service -> AnimalModel: 查詢動物
+activate AnimalModel
+AnimalModel -> DB: SELECT * FROM animals WHERE animal_id=? AND deleted_at IS NULL
+activate DB
+DB --> AnimalModel: animal record
+deactivate DB
+AnimalModel --> Service: animal (status='SUBMITTED')
+deactivate AnimalModel
+
+Service -> Service: 驗證狀態\nIF status != 'SUBMITTED':\nraise ValidationError('只能拒絕待審核狀態的動物')
+
+Service -> Service: 驗證拒絕原因\nIF not rejection_reason.strip():\nraise ValidationError('請提供拒絕原因')
+
+== Stage 12b: 更新動物為草稿狀態 ==
+Service -> AnimalModel: 更新動物狀態為草稿
+activate AnimalModel
+AnimalModel -> DB: UPDATE animals SET\nstatus='DRAFT',\nrejection_reason=?,\nrejected_at=NOW(),\nrejected_by=? (admin.user_id),\nupdated_at=NOW()\nWHERE animal_id=?
+activate DB
+note right of DB
+  拒絕後狀態變更:
+  - status: SUBMITTED → DRAFT
+  - rejection_reason: 拒絕原因文字
+  - rejected_at: 拒絕時間戳
+  - rejected_by: 管理員 user_id
+end note
+DB --> AnimalModel: success
+deactivate DB
+AnimalModel --> Service: success
+deactivate AnimalModel
+
+Service -> Service: db.session.commit()
+
+== Stage 13b: 記錄拒絕審計日誌 ==
+Service -> AuditService: log_action(\nactor_id=admin.user_id,\naction='reject_animal',\ntarget_type='Animal',\ntarget_id=animal_id,\ndetails={'rejection_reason': reason}\n)
+activate AuditService
+AuditService -> AuditLogModel: 記錄拒絕日誌
+activate AuditLogModel
+AuditLogModel -> DB: INSERT INTO audit_logs
+activate DB
+DB --> AuditLogModel: audit_log created
+deactivate DB
+AuditLogModel --> AuditService: audit_log created
+deactivate AuditLogModel
+AuditService --> Service: success
+deactivate AuditService
+
+== Stage 14b: 發送拒絕通知 (TODO: 尚未實現) ==
+Service -> Service: # TODO: 發送通知給動物擁有者
+note right
+  目前尚未實現通知功能
+  計劃實現:
+  - NotificationService.create_notification()
+  - type='animal_rejected'
+  - 包含拒絕原因
+end note
+
+note over Service, NotificationService
+  以下為計劃中的通知流程 (待實現):
+end note
+
+Service -> NotificationService: (TODO) create_notification(\nuser_id=animal.owner_id,\ntype='animal_rejected',\ntitle='您的動物刊登未通過審核',\nmessage='拒絕原因: {rejection_reason}',\nrelated_id=animal_id,\nrelated_type='Animal'\n)
+activate NotificationService
+NotificationService -> NotificationModel: (TODO) 建立拒絕通知
+activate NotificationModel
+NotificationModel -> DB: (TODO) INSERT INTO notifications
+activate DB
+DB --> NotificationModel: (TODO) notification record
+deactivate DB
+NotificationModel --> NotificationService: (TODO) notification created
+deactivate NotificationModel
+NotificationService --> Service: (TODO) notification_id
+deactivate NotificationService
+
+Service --> Blueprint: animal (status='DRAFT', rejection_reason)
+deactivate Service
+Blueprint --> API: 200 OK {animal}
+deactivate Blueprint
+API --> Dashboard: success
+deactivate API
+
+Dashboard -> Dashboard: closeRejectModal()\n- 清空 rejectionReason\n- 關閉 Modal\n- 更新列表
+Dashboard --> Admin: 顯示成功訊息「✗ 已拒絕並通知送養者」
+deactivate Dashboard
+end
+
+else 操作 3: 批次核准發布
+
+== Stage 8c: 批次選擇動物 ==
+Admin -> Dashboard: 勾選多隻動物 checkbox
+activate Dashboard
+Dashboard -> Dashboard: selectedAnimals.push(animal_id)\n顯示批次操作面板\n「已選擇 N 隻動物」
+
+Admin -> Dashboard: 點擊「批次核准發布」
+Dashboard -> Dashboard: 確認 selectedAnimals.length > 0
+
+== Stage 9c: 批次核准處理 ==
+Dashboard -> Dashboard: batchProcessing = true
+loop 每隻選中的動物
+    Dashboard -> API: publishAnimal(animal_id)
+    activate API
+    API -> Blueprint: PATCH /animals/{animal_id}
+    activate Blueprint
+    Blueprint -> Service: update_animal(animal_id, {'status': 'PUBLISHED'})
+    activate Service
+    Service -> AnimalModel: 更新狀態
+    activate AnimalModel
+    AnimalModel -> DB: UPDATE animals SET status='PUBLISHED'
+    activate DB
+    DB --> AnimalModel: success
+    deactivate DB
+    AnimalModel --> Service: success
+    deactivate AnimalModel
+    Service -> Service: db.session.commit()
+    Service -> AuditService: log_action('approve_animal')
+    activate AuditService
+    AuditService -> AuditLogModel: 記錄日誌
+    activate AuditLogModel
+    AuditLogModel -> DB: INSERT audit_log
+    activate DB
+    DB --> AuditLogModel: success
+    deactivate DB
+    AuditLogModel --> AuditService: success
+    deactivate AuditLogModel
+    deactivate AuditService
+    Service -> NotificationService: create_notification('animal_approved')
+    activate NotificationService
+    NotificationService -> NotificationModel: 建立通知
+    activate NotificationModel
+    NotificationModel -> DB: INSERT notification
+    activate DB
+    DB --> NotificationModel: success
+    deactivate DB
+    NotificationModel --> NotificationService: success
+    deactivate NotificationModel
+    deactivate NotificationService
+    Service --> Blueprint: animal
+    deactivate Service
+    Blueprint --> API: 200 OK
+    deactivate Blueprint
+    API --> Dashboard: success
+    deactivate API
+end
+
+Dashboard -> Dashboard: batchProcessing = false\nselectedAnimals = []\n重新載入列表
+Dashboard --> Admin: 顯示「✓ 批次核准 N 隻動物成功」
+deactivate Dashboard
+
+else 操作 4: 批次拒絕
+
+== Stage 8d: 開啟批次拒絕 Modal ==
+Admin -> Dashboard: 點擊「批次拒絕」按鈕
+activate Dashboard
+Dashboard -> Dashboard: openBatchRejectModal()\n- showRejectModal = true\n- isBatchReject = true\n- 顯示已選動物預覽
+Dashboard --> Admin: 顯示批次拒絕 Modal\n標題: 「批次拒絕 N 隻動物」\n提示: 「將對以下 N 隻動物套用相同的拒絕原因」
+deactivate Dashboard
+
+Admin -> Dashboard: 輸入拒絕原因並確認
+activate Dashboard
+
+== Stage 9d: 批次拒絕處理 ==
+Dashboard -> Dashboard: batchProcessing = true
+loop 每隻選中的動物
+    Dashboard -> API: rejectAnimal(animal_id, rejection_reason)
+    activate API
+    API -> Blueprint: POST /animals/{animal_id}/reject
+    activate Blueprint
+    Blueprint -> Service: reject_animal(animal_id, admin, rejection_reason)
+    activate Service
+    Service -> AnimalModel: 更新為草稿
+    activate AnimalModel
+    AnimalModel -> DB: UPDATE animals SET\nstatus='DRAFT',\nrejection_reason=?,\nrejected_at=NOW(),\nrejected_by=?
+    activate DB
+    DB --> AnimalModel: success
+    deactivate DB
+    AnimalModel --> Service: success
+    deactivate AnimalModel
+    Service -> Service: db.session.commit()
+    Service -> AuditService: log_action('reject_animal')
+    activate AuditService
+    AuditService -> AuditLogModel: 記錄日誌
+    activate AuditLogModel
+    AuditLogModel -> DB: INSERT audit_log
+    activate DB
+    DB --> AuditLogModel: success
+    deactivate DB
+    AuditLogModel --> AuditService: success
+    deactivate AuditLogModel
+    deactivate AuditService
+    Service -> NotificationService: create_notification('animal_rejected')
+    activate NotificationService
+    NotificationService -> NotificationModel: 建立通知
+    activate NotificationModel
+    NotificationModel -> DB: INSERT notification
+    activate DB
+    DB --> NotificationModel: success
+    deactivate DB
+    NotificationModel --> NotificationService: success
+    deactivate NotificationModel
+    deactivate NotificationService
+    Service --> Blueprint: animal
+    deactivate Service
+    Blueprint --> API: 200 OK
+    deactivate Blueprint
+    API --> Dashboard: success
+    deactivate API
+end
+
+Dashboard -> Dashboard: batchProcessing = false\nselectedAnimals = []\ncloseRejectModal()\n重新載入列表
+Dashboard --> Admin: 顯示「✗ 批次拒絕 N 隻動物成功」
+deactivate Dashboard
+
+else 操作 5: 查看審計日誌
+
+== Stage 8e: 進入審計日誌頁面 ==
+Admin -> Dashboard: 點擊「審計日誌」快速連結
+activate Dashboard
+Dashboard -> Dashboard: router.push('/audit-logs')
+deactivate Dashboard
+
+Admin -> AuditLogs: 訪問 /audit-logs
+activate AuditLogs
+AuditLogs -> API: getAuditLogs({page: 1, per_page: 50})
+activate API
+API -> AdminBlueprint: GET /admin/audit-logs?page=1&per_page=50
+activate AdminBlueprint
+
+AdminBlueprint -> AdminBlueprint: @jwt_required() + require_admin()
+AdminBlueprint -> UserModel: 驗證管理員權限
+activate UserModel
+UserModel -> DB: SELECT * FROM users WHERE user_id=?
+activate DB
+DB --> UserModel: user record
+deactivate DB
+UserModel --> AdminBlueprint: user.role == ADMIN
+deactivate UserModel
+
+AdminBlueprint -> AdminService: get_audit_logs(page, per_page)
+activate AdminService
+AdminService -> AuditLogModel: 查詢審計日誌
+activate AuditLogModel
+AuditLogModel -> DB: SELECT * FROM audit_logs\nLEFT JOIN users ON actor_id=user_id\nORDER BY timestamp DESC\nLIMIT 50 OFFSET 0
+activate DB
+DB --> AuditLogModel: audit_logs records
+deactivate DB
+AuditLogModel --> AdminService: audit_logs[]\n(含 actor_email, action, target_type, target_id, details)
+deactivate AuditLogModel
+AdminService --> AdminBlueprint: {logs[], page, pages, total}
+deactivate AdminService
+AdminBlueprint --> API: 200 OK {logs[]}
+deactivate AdminBlueprint
+API --> AuditLogs: logs[]
+deactivate API
+
+AuditLogs -> AuditLogs: 渲染審計日誌表格\n- 時間戳記\n- 操作者 email\n- 操作類型 (approve_animal, reject_animal, etc.)\n- 目標類型和 ID\n- 可展開查看 details
+AuditLogs --> Admin: 顯示系統操作記錄
+deactivate AuditLogs
+
+end
+
+== Stage 15: 錯誤處理 ==
+note over Dashboard, Service
+可能的錯誤情況:
+1. 401 Unauthorized: JWT token 無效或過期
+   → 重導向到登入頁
+   
+2. 403 Forbidden: 非管理員嘗試核准/拒絕
+   → 顯示「只有管理員可以執行此操作」
+   
+3. 404 Not Found: 動物不存在或已刪除
+   → 顯示「動物不存在」並重新載入列表
+   
+4. 400 Bad Request: 
+   - 狀態不是 SUBMITTED (無法核准/拒絕)
+   - 缺少拒絕原因
+   → 顯示具體錯誤訊息
+   
+5. 500 Internal Server Error: 資料庫錯誤
+   → 顯示「操作失敗，請稍後再試」
+end note
+
+== Stage 16: 資料顯示規則 ==
+note over Dashboard
+動物卡片顯示規則:
+1. SUBMITTED 狀態:
+   - 顯示核准和拒絕按鈕
+   - 可勾選進行批次操作
+   - 橘色徽章「待審核」
+   
+2. PUBLISHED 狀態:
+   - 顯示下架按鈕
+   - 可批次下架
+   - 綠色徽章「已發布」
+   
+3. DRAFT 狀態:
+   - 顯示 rejection_reason (若有)
+   - 紅色提示文字
+   - 灰色徽章「草稿」
+   
+4. RETIRED 狀態:
+   - 無操作按鈕
+   - 紅色徽章「已下架」
+
+統計卡片顏色:
+- 待審核: 橘色 (orange-600) ⏳
+- 已發布: 綠色 (green-600) ✓
+- 草稿: 灰色 (gray-600) 📝
+- 已下架: 紅色 (red-600) ✗
+end note
+
+@enduml

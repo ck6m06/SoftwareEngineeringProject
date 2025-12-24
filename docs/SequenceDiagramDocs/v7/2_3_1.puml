@@ -1,30 +1,356 @@
-@startuml
-title Use Case 2.3.1: Shelter Batch Upload
-actor ShelterMember
-participant ShelterBatch.vue
-participant animals.ts
-participant animals.py
-participant animal_service.py
-participant jobs.py
-participant job_service.py
-database MySQL
+@startuml 使用案例 2_3_1: 收容所批次匯入
+title 使用案例 2.3.1: 收容所批次匯入
 
-ShelterMember -> ShelterBatch.vue: Upload Excel file
-ShelterBatch.vue -> ShelterBatch.vue: Validate file format
-ShelterBatch.vue -> animals.ts: uploadBatchAnimals(file)
-animals.ts -> animals.py: POST /animals/batch
-animals.py -> job_service.py: create_batch_job()
-job_service.py -> MySQL: INSERT INTO jobs
-MySQL --> job_service.py: job_id
-job_service.py --> animals.py: job
-animals.py --> animals.ts: 202 Accepted
-animals.ts --> ShelterBatch.vue: job_id
-ShelterBatch.vue --> ShelterMember: Processing started
+actor "收容所會員" as User
+participant "ShelterBatch.vue" as ShelterBatchPage
+participant "shelters.ts" as ShelterAPI
+participant "shelters.py(blueprint)" as ShelterBlueprint
+participant "shelter_service.py" as ShelterService
+participant "animal_tasks.py" as AnimalTasksWorker
+participant "others.py(Job)(model)" as JobModel
+participant "animal.py(model)" as AnimalModel
+participant "medical_record.py(model)" as MedicalRecordModel
+participant "others.py(Attachment)(model)" as AttachmentModel
+participant "MinIO" as Storage
+participant "Celery Worker" as CeleryWorker
+database "MySQL" as DB
 
-== Background Processing ==
-job_service.py -> animal_service.py: process_batch()
-loop Each row
-  animal_service.py -> MySQL: INSERT animal
+== 1. 檔案上傳與驗證 ==
+User -> ShelterBatchPage: 選擇動物基本資訊 CSV (必填)
+activate ShelterBatchPage
+ShelterBatchPage -> ShelterBatchPage: 前端檔案格式驗證
+note right
+  檢查 CSV 格式
+  必填欄位: animal_code, name, species, 
+  breed, sex, dob, color, description
+end note
+
+User -> ShelterBatchPage: 選擇醫療記錄 CSV (選填)
+ShelterBatchPage -> ShelterBatchPage: 驗證醫療記錄格式
+note right
+  必填欄位: animal_code, record_type,
+  date, record_sequence
+end note
+
+User -> ShelterBatchPage: 上傳醫療證明文件 (選填)
+note right
+  檔名格式: {animal_code}_{record_sequence}.pdf
+  例: 001_1.pdf, 001_2.pdf
+end note
+
+User -> ShelterBatchPage: 上傳動物照片 (選填)
+note right
+  檔名格式: {animal_code}_{order}.jpg
+  例: 001_1.jpg, 001_2.jpg
+end note
+
+== 2. 提交批次匯入請求 ==
+User -> ShelterBatchPage: 點擊「開始匯入」
+ShelterBatchPage -> ShelterBatchPage: 建立 FormData
+note right
+  包含所有檔案:
+  - animal_csv
+  - medical_csv
+  - medical_proofs[]
+  - photos[]
+end note
+
+ShelterBatchPage -> ShelterAPI: batchImportAnimals(shelterId, formData)
+activate ShelterAPI
+ShelterAPI -> ShelterBlueprint: POST /shelters/{shelter_id}/animals/batch
+activate ShelterBlueprint
+ShelterBlueprint -> ShelterBlueprint: 檢查收容所權限
+ShelterBlueprint -> ShelterBlueprint: 讀取 animal_csv 內容
+ShelterBlueprint -> ShelterBlueprint: 讀取 medical_csv 內容 (如有)
+
+== 3. 上傳檔案到 MinIO ==
+loop 每個醫療證明文件
+  ShelterBlueprint -> Storage: 上傳 PDF 證明
+  activate Storage
+  Storage --> ShelterBlueprint: 返回 storage_key 和 url
+  deactivate Storage
+  ShelterBlueprint -> ShelterBlueprint: 記錄 {filename, storage_key, url}
 end
-animal_service.py -> MySQL: UPDATE job SET status=COMPLETED
+
+loop 每張動物照片
+  ShelterBlueprint -> Storage: 上傳照片
+  activate Storage
+  Storage --> ShelterBlueprint: 返回 storage_key 和 url
+  deactivate Storage
+  ShelterBlueprint -> ShelterBlueprint: 記錄 {filename, storage_key, url}
+end
+
+== 4. 建立批次匯入任務 ==
+ShelterBlueprint -> ShelterService: create_batch_import_job(...)
+activate ShelterService
+note right
+  參數包含:
+  - shelter_id
+  - user_id
+  - animal_csv_content
+  - medical_csv_content
+  - medical_proofs[] (MinIO 資訊)
+  - photos[] (MinIO 資訊)
+end note
+
+ShelterService -> ShelterService: 檢查收容所存在
+ShelterService -> ShelterService: 檢查使用者權限
+
+ShelterService -> JobModel: 建立 Job 記錄
+activate JobModel
+JobModel -> DB: INSERT INTO jobs (type='IMPORT_ANIMALS', status='PENDING', payload={...})
+activate DB
+note right
+  payload 包含:
+  - shelter_id
+  - animal_csv_content (CSV 文字內容)
+  - medical_csv_content
+  - medical_proofs[] (MinIO 路徑)
+  - photos[] (MinIO 路徑)
+end note
+DB --> JobModel: job_id
+deactivate DB
+JobModel --> ShelterService: Job 物件
+deactivate JobModel
+
+ShelterService -> CeleryWorker: process_animal_batch_import.delay(job_id)
+activate CeleryWorker
+note right
+  將任務加入 Celery 佇列
+  返回 202 Accepted
+end note
+CeleryWorker --> ShelterService: Task ID
+deactivate CeleryWorker
+
+ShelterService --> ShelterBlueprint: Job 物件
+deactivate ShelterService
+ShelterBlueprint --> ShelterAPI: 202 Accepted + {job_id, message}
+deactivate ShelterBlueprint
+ShelterAPI --> ShelterBatchPage: {job_id}
+deactivate ShelterAPI
+ShelterBatchPage --> User: 顯示「批次匯入已加入隊列」
+deactivate ShelterBatchPage
+
+== 5. 背景任務處理 (Celery Worker) ==
+CeleryWorker -> AnimalTasksWorker: process_animal_batch_import(job_id)
+activate CeleryWorker
+activate AnimalTasksWorker
+AnimalTasksWorker -> JobModel: 查詢 Job
+activate JobModel
+JobModel -> DB: SELECT * FROM jobs WHERE job_id=?
+activate DB
+DB --> JobModel: Job 資料
+deactivate DB
+JobModel --> AnimalTasksWorker: Job 物件
+deactivate JobModel
+
+AnimalTasksWorker -> JobModel: 更新狀態為 RUNNING
+activate JobModel
+JobModel -> DB: UPDATE jobs SET status='RUNNING', started_at=now()
+activate DB
+deactivate DB
+deactivate JobModel
+
+AnimalTasksWorker -> AnimalTasksWorker: 從 payload 取得參數
+AnimalTasksWorker -> AnimalTasksWorker: 解析 animal_csv_content
+
+== 6. CSV 預驗證 ==
+AnimalTasksWorker -> AnimalTasksWorker: 驗證 CSV 標題
+note right
+  檢查必填欄位:
+  animal_code, name, species, breed,
+  sex, dob, color, description
+end note
+
+AnimalTasksWorker -> AnimalTasksWorker: 預驗證照片檔名格式
+note right
+  檔名格式: {animal_code}_{order}.ext
+  檢查 animal_code 是否在 CSV 中
+  支援數字匹配 (001 vs 1)
+end note
+
+AnimalTasksWorker -> AnimalTasksWorker: 預驗證醫療證明檔名格式
+note right
+  檔名格式: {animal_code}_{record_sequence}.pdf
+  檢查對應的醫療記錄是否存在
+end note
+
+alt 預驗證失敗
+  AnimalTasksWorker -> JobModel: 更新狀態為 FAILED
+  activate JobModel
+  JobModel -> DB: UPDATE jobs SET status='FAILED', result_summary={errors}
+  activate DB
+  deactivate DB
+  deactivate JobModel
+  AnimalTasksWorker --> CeleryWorker: 返回錯誤統計
+  deactivate AnimalTasksWorker
+  deactivate CeleryWorker
+else 預驗證通過
+  
+  == 7. 批次建立動物資料 ==
+  loop 每一列動物資料
+    AnimalTasksWorker -> AnimalTasksWorker: 解析動物資訊
+    AnimalTasksWorker -> AnimalTasksWorker: 解析日期格式 (支援多種格式)
+    
+    AnimalTasksWorker -> AnimalModel: 建立 Animal 記錄
+    activate AnimalModel
+    AnimalModel -> DB: INSERT INTO animals (shelter_id, name, species, breed, sex, dob, status='DRAFT', ...)
+    activate DB
+    note right
+      批次匯入動物預設為 DRAFT 狀態
+      需後續在管理頁面批次提交或發布
+      owner_id = NULL
+      shelter_id = payload.shelter_id
+    end note
+    DB --> AnimalModel: animal_id
+    deactivate DB
+    AnimalModel --> AnimalTasksWorker: Animal 物件
+    deactivate AnimalModel
+    
+    AnimalTasksWorker -> AnimalTasksWorker: 記錄映射 {animal_code: animal_id}
+    AnimalTasksWorker -> AnimalTasksWorker: 記錄數字版本映射 (001→1)
+  end
+  
+  == 8. 批次建立醫療記錄 ==
+  alt 有 medical_csv_content
+    loop 每一列醫療記錄
+      AnimalTasksWorker -> AnimalTasksWorker: 根據 animal_code 查找 animal_id
+      AnimalTasksWorker -> AnimalTasksWorker: 解析醫療記錄資訊
+      
+      AnimalTasksWorker -> MedicalRecordModel: 建立 MedicalRecord
+      activate MedicalRecordModel
+      MedicalRecordModel -> DB: INSERT INTO medical_records (animal_id, record_type, date, provider, details, ...)
+      activate DB
+      DB --> MedicalRecordModel: record_id
+      deactivate DB
+      MedicalRecordModel --> AnimalTasksWorker: MedicalRecord 物件
+      deactivate MedicalRecordModel
+      
+      AnimalTasksWorker -> AnimalTasksWorker: 記錄映射 {animal_code}_{record_sequence}: record_id}
+    end
+  end
+  
+  == 9. 關聯醫療證明文件 ==
+  alt 有 medical_proofs
+    loop 每個醫療證明文件
+      AnimalTasksWorker -> AnimalTasksWorker: 解析檔名 {animal_code}_{record_sequence}.pdf
+      AnimalTasksWorker -> AnimalTasksWorker: 查找對應的 medical_record_id
+      
+      alt 找到對應醫療記錄
+        AnimalTasksWorker -> AttachmentModel: 建立 Attachment (關聯到 medical_record)
+        activate AttachmentModel
+        AttachmentModel -> DB: INSERT INTO attachments (owner_type='medical_record', owner_id=record_id, storage_key, url, ...)
+        activate DB
+        note right
+          優先關聯到醫療記錄
+        end note
+        DB --> AttachmentModel: attachment_id
+        deactivate DB
+        AttachmentModel --> AnimalTasksWorker: Attachment 物件
+        deactivate AttachmentModel
+      else 找不到醫療記錄
+        AnimalTasksWorker -> AttachmentModel: 建立 Attachment (關聯到 animal)
+        activate AttachmentModel
+        AttachmentModel -> DB: INSERT INTO attachments (owner_type='animal', owner_id=animal_id, storage_key, url, ...)
+        activate DB
+        note right
+          回退機制: 直接關聯到動物
+          保留檔案不遺失
+        end note
+        DB --> AttachmentModel: attachment_id
+        deactivate DB
+        AttachmentModel --> AnimalTasksWorker: Attachment 物件
+        deactivate AttachmentModel
+      end
+    end
+  end
+  
+  == 10. 關聯動物照片 ==
+  alt 有 photos
+    loop 每張照片
+      AnimalTasksWorker -> AnimalTasksWorker: 解析檔名 {animal_code}_{order}.jpg
+      AnimalTasksWorker -> AnimalTasksWorker: 查找對應的 animal_id (支援數字匹配)
+      note right
+        支援多種 animal_code 格式:
+        - 原始匹配: "001" → "001"
+        - 數字匹配: "1" → "001"
+        - 零填充匹配: "01" → "001"
+      end note
+      
+      AnimalTasksWorker -> AnimalModel: 建立 AnimalImage 記錄
+      activate AnimalModel
+      AnimalModel -> DB: INSERT INTO animal_images (animal_id, url, storage_key, order, ...)
+      activate DB
+      note right
+        使用專用 AnimalImage 模型
+        不是 Attachment 模型
+        order: 照片顯示順序 (從檔名解析)
+      end note
+      DB --> AnimalModel: image_id
+      deactivate DB
+      AnimalModel --> AnimalTasksWorker: AnimalImage 物件
+      deactivate AnimalModel
+    end
+  end
+  
+  == 11. 完成任務 ==
+  AnimalTasksWorker -> AnimalTasksWorker: 計算統計資訊與判斷任務狀態
+  note right
+    判斷邏輯:
+    1. 動物匯入失敗 → status='FAILED'
+    2. 所有附件失敗 → status='FAILED' + overall_result='partial_failed'
+    3. 部分附件失敗 → status='SUCCEEDED' + overall_result='partial_success'
+    4. 完全成功 → status='SUCCEEDED' + overall_result='success'
+    
+    統計結構:
+    - overall_result: 'success' | 'partial_success' | 'partial_failed' | 'failed'
+    - result_message: 中文結果描述
+    - has_errors: boolean
+    - animals: {total, success, failed}
+    - medical_records: {total, success}
+    - medical_proofs: {total, success}
+    - photos: {total, success}
+    - error_samples: errors[:20] (前20個錯誤)
+  end note
+  
+  AnimalTasksWorker -> JobModel: 更新狀態為 SUCCEEDED 或 FAILED
+  activate JobModel
+  JobModel -> DB: UPDATE jobs SET status=?, completed_at=now(), result_summary={...}
+  activate DB
+  deactivate DB
+  deactivate JobModel
+  AnimalTasksWorker --> CeleryWorker: 返回統計結果
+  deactivate AnimalTasksWorker
+  deactivate CeleryWorker
+end
+
+== 12. 使用者查看結果 ==
+User -> ShelterBatchPage: 查看批次匯入任務狀態
+activate ShelterBatchPage
+ShelterBatchPage -> ShelterAPI: getJobs()
+activate ShelterAPI
+ShelterAPI -> ShelterBlueprint: GET /shelters/{shelter_id}/jobs
+activate ShelterBlueprint
+ShelterBlueprint -> JobModel: 查詢 Jobs
+activate JobModel
+JobModel -> DB: SELECT * FROM jobs WHERE payload->>'shelter_id' = ?
+activate DB
+DB --> JobModel: Jobs 列表
+deactivate DB
+JobModel --> ShelterBlueprint: Jobs
+deactivate JobModel
+ShelterBlueprint --> ShelterAPI: Jobs 列表
+deactivate ShelterBlueprint
+ShelterAPI --> ShelterBatchPage: Jobs 資料
+deactivate ShelterAPI
+ShelterBatchPage --> User: 顯示任務狀態和結果統計
+
+alt 任務成功
+  ShelterBatchPage -> ShelterBatchPage: 自動跳轉到收容所動物管理頁面
+  ShelterBatchPage --> User: 顯示成功訊息
+else 任務失敗
+  ShelterBatchPage --> User: 顯示錯誤清單和修正建議
+end
+deactivate ShelterBatchPage
+
 @enduml

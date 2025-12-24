@@ -1,0 +1,260 @@
+@startuml 使用案例7_2_使用者登入
+title 使用案例7.2: 使用者登入流程
+
+actor "已註冊使用者" as RegisteredUser
+participant "Login.vue" as LoginPage
+participant "auth.ts" as AuthStore
+participant "client.ts" as APIClient
+participant "auth.py(blueprint)" as AuthBlueprint
+participant "auth_service.py" as AuthService
+participant "audit_service.py" as AuditService
+participant "user.py(model)" as UserModel
+database "MySQL" as DB
+
+== 1. 進入登入頁面 ==
+note over RegisteredUser
+  前提條件:
+  - 使用者已完成註冊
+  - 帳號已通過 Email 驗證
+  - 帳號未被鎖定
+end note
+
+RegisteredUser -> LoginPage: 訪問「/login」路由
+activate LoginPage
+LoginPage -> LoginPage: 初始化表單\nemail = '', password = ''
+LoginPage -> LoginPage: 顯示登入表單
+note right
+  顯示內容:
+  - Email 輸入框
+  - 密碼輸入框
+  - "登入" 按鈕
+  - "忘記密碼？" 連結
+  - "還沒有帳號？立即註冊" 連結
+end note
+LoginPage --> RegisteredUser: 顯示登入頁面
+deactivate LoginPage
+
+== 2. 輸入登入資訊 ==
+RegisteredUser -> LoginPage: 輸入 Email 和密碼
+activate LoginPage
+LoginPage -> LoginPage: v-model 雙向綁定\nemail.value, password.value
+LoginPage --> RegisteredUser: 顯示輸入內容
+deactivate LoginPage
+
+== 3. 提交登入表單 ==
+RegisteredUser -> LoginPage: 點擊「登入」按鈕
+activate LoginPage
+LoginPage -> LoginPage: handleLogin()\n@submit.prevent
+LoginPage -> LoginPage: unverifiedEmail = ''\n清除未驗證提示
+
+== 4. 呼叫登入 API ==
+LoginPage -> AuthStore: authStore.login(\nemail.value, password.value)
+activate AuthStore
+AuthStore -> APIClient: api.post('/auth/login',\n{ email, password })
+activate APIClient
+APIClient -> APIClient: 添加 baseURL
+APIClient -> AuthBlueprint: POST /auth/login\nBody: { email, password }
+activate AuthBlueprint
+
+== 5. 後端驗證欄位 ==
+AuthBlueprint -> AuthBlueprint: data = request.get_json()
+AuthBlueprint -> AuthBlueprint: 檢查必填欄位\n(email, password)
+
+alt 缺少必填欄位
+    AuthBlueprint --> APIClient: 400 Bad Request\n{"message": "Email 和密碼為必填"}
+    APIClient --> AuthStore: error (400)
+    AuthStore --> LoginPage: error
+    LoginPage -> LoginPage: catch error\nalert("登入失敗...")
+    LoginPage --> RegisteredUser: 顯示錯誤訊息\n(彈窗提示)
+    note left: 中斷流程
+else 欄位齊全
+    AuthBlueprint -> AuthBlueprint: 取得 email, password
+end
+
+== 6. 執行登入驗證 ==
+AuthBlueprint -> AuthService: auth_service.login(\nemail, password)
+activate AuthService
+
+AuthService -> UserModel: User.query.filter_by(\nemail=email, deleted_at=None).first()
+activate UserModel
+UserModel -> DB: SELECT * FROM users\nWHERE email=:email\nAND deleted_at IS NULL\nLIMIT 1
+activate DB
+DB --> UserModel: User 或 None
+deactivate DB
+UserModel --> AuthService: user
+deactivate UserModel
+
+alt 用戶不存在
+    AuthService --> AuthBlueprint: raise UnauthorizedError\n("Email 或密碼錯誤")
+    AuthBlueprint --> APIClient: 401 Unauthorized\n{"message": "Email 或密碼錯誤"}
+    APIClient --> AuthStore: error (401)
+    AuthStore --> LoginPage: error
+    LoginPage -> LoginPage: alert(error.message)
+    LoginPage --> RegisteredUser: 顯示錯誤：帳號或密碼錯誤
+    note left: 中斷流程
+else 用戶存在
+    AuthService -> AuthService: 取得 user 物件
+end
+
+== 7. 檢查 Email 驗證狀態 ==
+AuthService -> AuthService: 檢查 user.verified
+
+alt Email 未驗證
+    AuthService --> AuthBlueprint: raise PermissionDeniedError\n("請先驗證 Email，或使用重新發送驗證郵件功能")
+    AuthBlueprint --> APIClient: 403 Forbidden\n{"message": "請先驗證 Email..."}
+    APIClient --> AuthStore: error (403)
+    AuthStore --> LoginPage: error
+    LoginPage -> LoginPage: 檢查 status === 403\n且訊息含有「驗證」
+    LoginPage -> LoginPage: unverifiedEmail = email\n顯示重發驗證郵件提示
+    LoginPage --> RegisteredUser: 顯示黃色提示框\n"您的 Email 還未完成驗證"
+    note right
+      提示內容:
+      - 顯示未驗證的 Email
+      - "重新發送驗證郵件" 按鈕
+      - "輸入驗證連結" 連結
+    end note
+    note left: 中斷流程
+else Email 已驗證
+    AuthService -> AuthService: 繼續登入流程
+end
+
+== 8. 檢查帳號鎖定狀態 ==
+AuthService -> AuthService: 檢查 user.is_locked
+
+alt 帳號已被鎖定
+    AuthService --> AuthBlueprint: raise PermissionDeniedError\n(f"帳號已被鎖定至 {user.locked_until}")
+    AuthBlueprint --> APIClient: 403 Forbidden\n{"message": "帳號已被鎖定至..."}
+    APIClient --> AuthStore: error (403)
+    AuthStore --> LoginPage: error
+    LoginPage -> LoginPage: alert(error.message)
+    LoginPage --> RegisteredUser: 顯示錯誤：帳號已被鎖定
+    note left: 中斷流程
+else 帳號未鎖定
+    AuthService -> AuthService: 繼續驗證密碼
+end
+
+== 9. 驗證密碼 ==
+AuthService -> AuthService: verify_password(\npassword, user.password_hash)
+note right
+  使用雜湊比對:
+  將輸入的 password 雜湊後
+  與資料庫的 password_hash 比對
+end note
+
+alt 密碼錯誤
+    AuthService -> AuthService: user.failed_login_attempts += 1\n增加失敗次數
+    
+    alt 失敗次數 >= 5
+        AuthService -> AuthService: user.locked_until =\n  now + timedelta(minutes=30)\n鎖定帳號 30 分鐘
+        AuthService -> DB: db.session.commit()\n更新鎖定狀態
+        activate DB
+        DB --> AuthService: 提交成功
+        deactivate DB
+        
+        AuthService --> AuthBlueprint: raise UnauthorizedError\n("Email 或密碼錯誤")
+        AuthBlueprint --> APIClient: 401 Unauthorized\n{"message": "Email 或密碼錯誤"}
+        note right
+          實際上帳號已被鎖定
+          但錯誤訊息不透露細節
+          避免帳號探測攻擊
+        end note
+        APIClient --> AuthStore: error (401)
+        AuthStore --> LoginPage: error
+        LoginPage --> RegisteredUser: 顯示錯誤：密碼錯誤\n(已鎖定但不明說)
+        note left: 中斷流程
+    else 失敗次數 < 5
+        AuthService -> DB: db.session.commit()\n更新失敗次數
+        activate DB
+        DB --> AuthService: 提交成功
+        deactivate DB
+        
+        AuthService --> AuthBlueprint: raise UnauthorizedError\n("Email 或密碼錯誤")
+        AuthBlueprint --> APIClient: 401 Unauthorized
+        APIClient --> AuthStore: error (401)
+        AuthStore --> LoginPage: error
+        LoginPage --> RegisteredUser: 顯示錯誤：密碼錯誤\n(剩餘 5-n 次機會)
+        note left: 中斷流程
+    end
+else 密碼正確
+    AuthService -> AuthService: 登入成功，準備生成 Token
+end
+
+== 10. 登入成功處理 ==
+AuthService -> AuthService: user.failed_login_attempts = 0\nuser.locked_until = None\nuser.last_login_at = now
+note right
+  重置登入失敗狀態:
+  - 清除失敗次數
+  - 清除鎖定時間
+  - 更新最後登入時間
+end note
+
+AuthService -> DB: db.session.commit()\n更新用戶狀態
+activate DB
+DB --> AuthService: 提交成功
+deactivate DB
+
+== 11. 生成 JWT Token ==
+AuthService -> AuthService: create_access_token(\nidentity=str(user.user_id))
+AuthService -> AuthService: create_refresh_token(\nidentity=str(user.user_id))
+note right
+  JWT Token:
+  - access_token: 短期有效 (例如 15 分鐘)
+  - refresh_token: 長期有效 (例如 30 天)
+  - identity: 用戶 ID
+end note
+
+== 12. 記錄審計日誌 ==
+AuthService -> AuditService: audit_service.log_login(\nuser.user_id, success=True)
+activate AuditService
+AuditService -> DB: INSERT INTO audit_logs\nVALUES (action='user.login', ...)
+activate DB
+DB --> AuditService: 記錄成功
+deactivate DB
+AuditService --> AuthService: 審計完成
+deactivate AuditService
+
+AuthService --> AuthBlueprint: return (user, access_token, refresh_token)
+deactivate AuthService
+
+== 13. 回傳登入結果 ==
+AuthBlueprint --> APIClient: 200 OK\n{\n  "message": "登入成功",\n  "access_token": "eyJ...",\n  "refresh_token": "eyJ...",\n  "user": { user_id, email, role, ... }\n}
+deactivate AuthBlueprint
+APIClient --> AuthStore: response.data
+deactivate APIClient
+
+== 14. 儲存認證資訊 ==
+AuthStore -> AuthStore: 解構 response.data\naccess_token, refresh_token, user
+AuthStore -> AuthStore: accessToken.value = access_token\nrefreshToken.value = refresh_token\nuser.value = userData
+AuthStore -> AuthStore: localStorage.setItem(\n  'access_token', access_token)\nlocalStorage.setItem(\n  'refresh_token', refresh_token)\nlocalStorage.setItem(\n  'user', JSON.stringify(userData))
+note right
+  將認證資訊存入:
+  1. Pinia Store (記憶體)
+  2. LocalStorage (持久化)
+  
+  下次瀏覽器開啟時
+  可自動載入登入狀態
+end note
+
+AuthStore --> LoginPage: 登入成功
+deactivate AuthStore
+
+== 15. 導向首頁 ==
+LoginPage -> LoginPage: router.push('/')
+LoginPage --> RegisteredUser: 導向至首頁 (/)
+deactivate LoginPage
+
+RegisteredUser -> RegisteredUser: 以登入狀態使用系統
+note left
+  登入成功後:
+  - 可查看個人資料
+  - 可發佈送養
+  - 可提交領養申請
+  - 可管理自己的內容
+  
+  根據角色 (role) 顯示不同功能:
+  - GENERAL_MEMBER: 一般會員功能
+  - SHELTER_MEMBER: 收容所管理功能
+  - ADMIN: 系統管理功能
+end note
+
+@enduml

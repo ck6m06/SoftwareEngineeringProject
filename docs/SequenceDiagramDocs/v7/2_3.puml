@@ -1,0 +1,429 @@
+﻿@startuml 使用案例2_3_收容所送養發佈
+title 使用案例2.3: 收容所送養發佈流程
+
+actor "收容所會員" as User
+participant "RehomeForm.vue" as RehomeFormPage
+participant "FileUploader.vue" as FileUploader
+participant "animals.ts" as AnimalAPI
+participant "uploads.ts" as UploadAPI
+participant "animals.py(blueprint)" as AnimalBlueprint
+participant "uploads.py(blueprint)" as UploadBlueprint
+participant "animal_service.py" as AnimalService
+participant "animal.py(model)" as AnimalModel
+participant "others.py(Attachment)(model)" as AttachmentModel
+participant "user.py(model)" as UserModel
+participant "shelter.py(model)" as ShelterModel
+database "MySQL" as DB
+participant "MinIO" as Storage
+
+== 1. 進入送養發佈頁面 ==
+User -> RehomeFormPage: 訪問 /rehome-form
+activate RehomeFormPage
+RehomeFormPage -> RehomeFormPage: onMounted()\\n檢查使用者角色
+RehomeFormPage -> RehomeFormPage: authStore.user.role == 'SHELTER_MEMBER'
+
+alt 收容所會員
+    RehomeFormPage -> RehomeFormPage: 顯示收容所會員提示框
+    note right
+      提示內容:
+      - 此動物歸屬於收容所機構
+      - 可在「收容所動物管理」批次操作
+      - 如需批次匯入，使用收容所管理功能
+    end note
+    RehomeFormPage --> User: 顯示單次送養表單\\n+ 收容所會員提示
+end
+
+RehomeFormPage -> RehomeFormPage: 初始化表單\\ncurrentStep = 0\\nformData = {}
+RehomeFormPage --> User: 顯示步驟 1: 基本資訊表單
+deactivate RehomeFormPage
+
+== 2. 填寫動物基本資訊 ==
+User -> RehomeFormPage: 填寫基本資訊
+activate RehomeFormPage
+note right
+  必填欄位:
+  - name (名稱)
+  - species (物種: CAT/DOG)
+  - breed (品種)
+  - sex (性別: MALE/FEMALE)
+  - dob (出生日期)
+  
+  選填欄位:
+  - color (顏色)
+  - description (描述)
+end note
+RehomeFormPage -> RehomeFormPage: 即時驗證欄位
+
+User -> RehomeFormPage: 點擊「下一步」
+RehomeFormPage -> RehomeFormPage: validateStep(0)\\n檢查必填欄位
+alt 驗證失敗
+    RehomeFormPage --> User: 顯示錯誤訊息
+else 驗證通過
+    RehomeFormPage -> RehomeFormPage: currentStep = 1
+    RehomeFormPage --> User: 顯示步驟 2: 健康狀況表單
+end
+deactivate RehomeFormPage
+
+== 3. 填寫健康狀況 ==
+User -> RehomeFormPage: 填寫健康狀況
+activate RehomeFormPage
+note right
+  欄位:
+  - medical_summary (健康摘要)
+  - is_neutered (是否絕育)
+end note
+
+User -> RehomeFormPage: 點擊「下一步」
+RehomeFormPage -> RehomeFormPage: nextStep() 驗證
+alt 驗證失敗 (name, species, sex, description 任一未填)
+    RehomeFormPage -> RehomeFormPage: errorMessage = '請填寫所有必填欄位'
+    RehomeFormPage --> User: 顯示錯誤訊息
+else 驗證通過
+    RehomeFormPage -> RehomeFormPage: currentStep = 2
+    RehomeFormPage --> User: 顯示步驟 3: 照片上傳
+end
+deactivate RehomeFormPage
+
+== 4. 上傳動物照片 ==
+User -> RehomeFormPage: 選擇照片檔案
+activate RehomeFormPage
+RehomeFormPage -> FileUploader: 處理檔案選擇
+activate FileUploader
+FileUploader -> FileUploader: 驗證檔案\\n(格式、大小、數量)
+note right
+  檔案驗證:
+  - 格式: JPG, PNG
+  - 大小: 最大 5MB/檔
+  - 數量: 最多 10 張
+end note
+
+alt 驗證失敗
+    FileUploader --> RehomeFormPage: onUploadError(error)
+    RehomeFormPage --> User: 顯示錯誤訊息
+else 驗證通過
+    FileUploader -> FileUploader: files.push(file)\\n預覽圖片
+    FileUploader --> RehomeFormPage: 檔案已加入列表
+    deactivate FileUploader
+    RehomeFormPage --> User: 顯示照片預覽
+end
+
+User -> RehomeFormPage: 點擊「下一步」
+RehomeFormPage -> RehomeFormPage: nextStep() 驗證
+alt 新增模式且無照片
+    RehomeFormPage -> RehomeFormPage: errorMessage = '請至少選擇一張照片'
+    RehomeFormPage --> User: 顯示錯誤訊息
+else 有照片或編輯模式
+    RehomeFormPage -> RehomeFormPage: currentStep = 3
+    RehomeFormPage --> User: 顯示步驟 4: 確認送出
+end
+deactivate RehomeFormPage
+
+== 5. 確認並提交 ==
+User -> RehomeFormPage: 檢視資料摘要
+User -> RehomeFormPage: 點擊「提交發佈」
+activate RehomeFormPage
+RehomeFormPage -> RehomeFormPage: handleSubmit()\\nisSubmitting = true
+
+== 6. 創建動物記錄 ==
+RehomeFormPage -> AnimalAPI: createAnimal(animalData)
+activate AnimalAPI
+note right
+  animalData:
+  {
+    name, species, breed,
+    color, sex, dob,
+    description, medical_summary,
+    status: 'DRAFT'
+  }
+end note
+AnimalAPI -> AnimalBlueprint: POST /animals
+activate AnimalBlueprint
+
+AnimalBlueprint -> AnimalBlueprint: @jwt_required()\\n取得 current_user_id
+AnimalBlueprint -> UserModel: User.query.get(current_user_id)
+activate UserModel
+UserModel -> DB: SELECT * FROM users\\nWHERE user_id = :id
+activate DB
+DB --> UserModel: 使用者資料
+deactivate DB
+UserModel --> AnimalBlueprint: User 物件
+deactivate UserModel
+
+AnimalBlueprint -> AnimalService: create_animal(user, data)
+activate AnimalService
+
+== 7. 判斷動物歸屬 ==
+AnimalService -> AnimalService: 檢查使用者角色
+
+alt user.role == SHELTER_MEMBER && user.primary_shelter_id
+    AnimalService -> AnimalService: 設定為收容所動物\\nshelter_id = user.primary_shelter_id\\nowner_id = None
+    note right
+      收容所動物特性:
+      - 歸屬於收容所機構
+      - 不需管理員審核
+      - 可直接發布
+    end note
+else user.role == ADMIN && data.shelter_id
+    AnimalService -> AnimalService: 管理員指定收容所\\nshelter_id = data.shelter_id\\nowner_id = None
+else 其他情況
+    AnimalService -> AnimalService: 設定為個人送養\\nshelter_id = None\\nowner_id = user.user_id
+end
+
+== 8. 創建動物資料 ==
+AnimalService -> AnimalService: 組裝 Animal 物件\\nstatus = DRAFT\\ncreated_by = user.user_id
+
+AnimalService -> AnimalService: 驗證互斥條件\\nowner_id 與 shelter_id 不能同時存在
+alt 驗證失敗
+    AnimalService --> AnimalBlueprint: ValidationError:\\n'owner_id 與 shelter_id 不能同時存在'
+    AnimalBlueprint --> AnimalAPI: 400 Bad Request
+    AnimalAPI --> RehomeFormPage: 錯誤訊息
+    RehomeFormPage --> User: alert('發佈失敗')
+end
+
+AnimalService -> AnimalModel: Animal(...)\ndb.session.add(animal)
+activate AnimalModel
+AnimalModel -> DB: INSERT INTO animals\\n(name, species, breed, sex, dob,\\n shelter_id, owner_id, status,\\n created_by, ...)\\nVALUES (...)
+activate DB
+note right
+  收容所動物:
+  - shelter_id = :shelter_id
+  - owner_id = NULL
+  - status = 'DRAFT'
+  - created_by = :user_id
+end note
+DB --> AnimalModel: 插入成功，返回 animal_id
+deactivate DB
+AnimalModel --> AnimalService: Animal 物件
+deactivate AnimalModel
+
+AnimalService -> AnimalModel: db.session.commit()
+activate AnimalModel
+AnimalModel -> DB: COMMIT
+activate DB
+DB --> AnimalModel: 提交成功
+deactivate DB
+AnimalModel --> AnimalService: 完成
+deactivate AnimalModel
+
+AnimalService --> AnimalBlueprint: Animal 物件
+deactivate AnimalService
+
+AnimalBlueprint -> AnimalBlueprint: animal.to_dict()
+AnimalBlueprint --> AnimalAPI: 201 Created\\n{message, animal: {...}}
+deactivate AnimalBlueprint
+AnimalAPI --> RehomeFormPage: {animal: {animal_id, ...}}
+deactivate AnimalAPI
+
+RehomeFormPage -> RehomeFormPage: animalId = response.animal.animal_id
+
+== 9. 上傳照片 ==
+alt 有選擇照片 (uploaderFiles.length > 0)
+    loop 每張照片
+        RehomeFormPage -> UploadAPI: uploadMultiple(files, 'ANIMAL', animalId)
+        activate UploadAPI
+        
+        UploadAPI -> UploadBlueprint: POST /uploads/presigned-url
+        activate UploadBlueprint
+        UploadBlueprint -> UploadBlueprint: 生成預簽名 URL
+        UploadBlueprint --> UploadAPI: {upload_url, storage_key}
+        deactivate UploadBlueprint
+        
+        UploadAPI -> Storage: PUT upload_url\\n(直接上傳檔案)
+        activate Storage
+        Storage --> UploadAPI: 上傳成功
+        deactivate Storage
+        
+        UploadAPI -> UploadBlueprint: POST /uploads/confirm
+        activate UploadBlueprint
+        UploadBlueprint --> UploadAPI: {url, storage_key, mime_type}
+        deactivate UploadBlueprint
+        UploadAPI --> RehomeFormPage: uploadResults[]
+        deactivate UploadAPI
+        
+        RehomeFormPage -> AnimalAPI: addAnimalImage(animalId, imageData)
+        activate AnimalAPI
+        note right
+          imageData:
+          {
+            image_url: result.url,
+            storage_key: result.storage_key,
+            mime_type: result.mime_type
+          }
+        end note
+        AnimalAPI -> AnimalBlueprint: POST /animals/:id/images
+        activate AnimalBlueprint
+        
+        AnimalBlueprint -> AnimalService: add_image(animal_id, user, ...)
+        activate AnimalService
+        
+        AnimalService -> AttachmentModel: Attachment(...)\\ndb.session.add(attachment)
+        activate AttachmentModel
+        AttachmentModel -> DB: INSERT INTO attachments\\n(owner_type='animal',\\n owner_id=:animal_id,\\n storage_key, url, mime_type, ...)\\nVALUES (...)
+        activate DB
+        DB --> AttachmentModel: 插入成功
+        deactivate DB
+        AttachmentModel --> AnimalService: Attachment 物件
+        deactivate AttachmentModel
+        
+        AnimalService -> AttachmentModel: db.session.commit()
+        activate AttachmentModel
+        AttachmentModel -> DB: COMMIT
+        activate DB
+        DB --> AttachmentModel: 提交成功
+        deactivate DB
+        AttachmentModel --> AnimalService: 完成
+        deactivate AttachmentModel
+        
+        AnimalService --> AnimalBlueprint: Attachment 物件
+        deactivate AnimalService
+        AnimalBlueprint --> AnimalAPI: 201 Created {message, image}
+        deactivate AnimalBlueprint
+        AnimalAPI --> RehomeFormPage: 圖片已新增
+        deactivate AnimalAPI
+    end
+end
+
+== 10. 提交審核 (收容所動物與個人送養相同流程) ==
+RehomeFormPage -> AnimalAPI: submitAnimal(animalId)
+activate AnimalAPI
+note right
+  ⚠️ 收容所動物沒有自動發布特權
+  狀態: DRAFT → SUBMITTED
+  需等待管理員審核通過才會變成 PUBLISHED
+end note
+AnimalAPI -> AnimalBlueprint: POST /animals/:id/submit
+activate AnimalBlueprint
+
+AnimalBlueprint -> AnimalService: submit_animal(animal_id, user)
+activate AnimalService
+
+AnimalService -> AnimalModel: Animal.query.filter_by(animal_id).first()
+activate AnimalModel
+AnimalModel -> DB: SELECT * FROM animals WHERE animal_id = :id
+activate DB
+DB --> AnimalModel: 動物資料
+deactivate DB
+AnimalModel --> AnimalService: Animal 物件
+deactivate AnimalModel
+
+AnimalService -> AnimalService: 驗證狀態 (必須為 DRAFT)
+AnimalService -> AnimalService: animal.status = SUBMITTED
+AnimalService -> AnimalModel: db.session.commit()
+activate AnimalModel
+AnimalModel -> DB: UPDATE animals\\nSET status = 'SUBMITTED',\\n    updated_at = NOW()\\nWHERE animal_id = :id
+activate DB
+note right
+  收容所動物狀態流程:
+  DRAFT → SUBMITTED → (管理員審核) → PUBLISHED
+  與個人送養完全相同
+end note
+DB --> AnimalModel: 更新成功
+deactivate DB
+AnimalModel --> AnimalService: 完成
+deactivate AnimalModel
+
+AnimalService --> AnimalBlueprint: Animal 物件
+deactivate AnimalService
+AnimalBlueprint --> AnimalAPI: 200 OK {message, animal}
+deactivate AnimalBlueprint
+AnimalAPI --> RehomeFormPage: 提交成功
+deactivate AnimalAPI
+
+== 11. 完成並導向 ==
+RehomeFormPage -> RehomeFormPage: isSubmitting = false
+RehomeFormPage -> RehomeFormPage: 清除草稿\\nlocalStorage.removeItem('rehome_draft')
+RehomeFormPage -> RehomeFormPage: submissionSuccess = true
+
+RehomeFormPage --> User: 顯示成功訊息
+note right
+  收容所動物成功訊息:
+  「送養資訊已建立並提交審核成功!
+   審核通過後將會公開顯示。」
+  
+  ⚠️ 注意: 不是「已發布」而是「已提交審核」
+  狀態為 SUBMITTED,需等待管理員批准
+end note
+
+opt 使用者選擇導向目標
+    alt 點擊「前往收容所動物管理」
+        RehomeFormPage -> RehomeFormPage: router.push('/shelter/animals')
+        RehomeFormPage --> User: 導向「收容所動物管理」頁面
+    else 點擊「返回首頁」或其他
+        RehomeFormPage --> User: 停留在成功頁面
+    end
+end
+deactivate RehomeFormPage
+
+== 12. 替代流程 - 儲存草稿 ==
+opt 使用者儲存草稿
+    User -> RehomeFormPage: 點擊「儲存草稿」按鈕
+    activate RehomeFormPage
+    RehomeFormPage -> RehomeFormPage: saveDraft()\\n基本驗證 (name, species)
+    
+    alt 驗證失敗
+        RehomeFormPage --> User: alert('請至少填寫動物名稱和物種')
+    else 驗證通過
+        RehomeFormPage -> AnimalAPI: createAnimal(animalData)
+        note right
+          與步驟 6-8 相同流程
+          狀態保持為 DRAFT
+        end note
+        AnimalAPI --> RehomeFormPage: {animal: {animal_id, ...}}
+        
+        RehomeFormPage -> RehomeFormPage: 儲存草稿資訊\nlocalStorage.setItem('rehome_draft', ...)
+        RehomeFormPage -> RehomeFormPage: router.replace({ query: { id: animalId } })
+        RehomeFormPage --> User: alert('草稿已儲存到資料庫')\n導向編輯模式
+    end
+    deactivate RehomeFormPage
+end
+
+== 13. 替代流程 - 前往收容所管理 ==
+opt 收容所會員選擇批次操作
+    User -> RehomeFormPage: 點擊「前往收容所動物管理」
+    activate RehomeFormPage
+    RehomeFormPage -> RehomeFormPage: router.push('/shelter/animals')
+    RehomeFormPage --> User: 導向收容所動物管理頁面
+    note right
+      收容所管理功能:
+      - 批次上傳動物
+      - 批次管理狀態
+      - 查看所有收容所動物
+    end note
+    deactivate RehomeFormPage
+end
+
+note over User, DB
+  **後置條件:**
+  1. 動物記錄已創建於資料庫
+  2. 收容所動物: shelter_id 已設定, owner_id 為 NULL
+  3. 個人送養: owner_id 已設定, shelter_id 為 NULL
+  4. 照片已上傳至 MinIO 並記錄於 attachments 表
+  5. 動物狀態為 SUBMITTED (已提交審核,等待管理員批准)
+  6. 暫存的醫療記錄已批次創建至資料庫
+  
+  **收容所動物特性 (非自動發布特權):**
+  - ✅ 歸屬於收容所機構 (shelter_id, owner_id = NULL)
+  - ✅ 可在收容所管理後台批次操作 (ShelterAnimals.vue)
+  - ✅ 支援批次匯入功能 (使用案例 2.3.1)
+  - ❌ 不會自動發布,狀態流程與個人送養相同:
+       DRAFT → SUBMITTED → (管理員審核) → PUBLISHED
+  
+  **資料驗證:**
+  - owner_id 與 shelter_id 互斥 (不能同時存在)
+  - 照片格式: JPG, PNG (最大 5MB, 最多 10 張)
+  - 必填欄位: name, species, sex, description (步驟1驗證)
+  - 照片必須: 新增模式至少1張 (步驟2驗證)
+  
+  **檔案上傳流程:**
+  - 前端  取得預簽名 URL
+  - 前端  直接上傳至 MinIO
+  - 前端  確認上傳並取得 URL
+  - 前端  建立 Attachment 記錄
+  
+  **替代方案:**
+  - 儲存草稿: 隨時儲存進度 (狀態保持 DRAFT)
+  - 批次匯入: 使用收容所管理功能 (使用案例 2.3.1)
+  - 編輯模式: 可修改已儲存的草稿或 SUBMITTED 狀態的動物
+end note
+
+@enduml

@@ -1,38 +1,418 @@
-@startuml
-title Use Case 2.4: Shelter Animals Management
-actor ShelterMember
-participant ShelterAnimals.vue
-participant animals.ts
-participant animals.py
-participant animal_service.py
-database MySQL
+@startuml 使用案例 2_4: 收容所送養管理
+title 使用案例2.4: 收容所送養管理
 
-ShelterMember -> ShelterAnimals.vue: Visit /shelter/animals
-ShelterAnimals.vue -> ShelterAnimals.vue: Get shelter_id from authStore
-ShelterAnimals.vue -> animals.ts: listAnimals(shelter_id)
-animals.ts -> animals.py: GET /animals?shelter_id=X
-animals.py -> animal_service.py: list_animals()
-animal_service.py -> MySQL: SELECT animals WHERE shelter_id
-MySQL --> animal_service.py: animals[]
-animal_service.py --> animals.py: result
-animals.py --> animals.ts: 200 OK
-animals.ts --> ShelterAnimals.vue: animals
-ShelterAnimals.vue --> ShelterMember: Display shelter animals
+actor "收容所會員" as User
+participant "ShelterAnimals.vue" as ShelterAnimalsPage
+participant "shelters.ts" as ShelterAPI
+participant "animals.ts" as AnimalAPI
+participant "shelters.py(blueprint)" as ShelterBlueprint
+participant "shelter_service.py" as ShelterService
+participant "animals.py(blueprint)" as AnimalBlueprint
+participant "animal_service.py" as AnimalService
+participant "animal.py(model)" as AnimalModel
+participant "shelter.py(model)" as ShelterModel
+participant "user.py(model)" as UserModel
+database "MySQL" as DB
 
-alt Update Animal
-  ShelterMember -> ShelterAnimals.vue: Edit animal
-  ShelterAnimals.vue -> animals.ts: updateAnimal(id, data)
-  animals.ts -> animals.py: PATCH /animals/{id}
-  animals.py -> animal_service.py: update_animal()
-  animal_service.py -> MySQL: UPDATE animals
-  MySQL --> animal_service.py: updated animal
-  animal_service.py --> animals.py: animal
-  animals.py --> animals.ts: 200 OK
-  animals.ts --> ShelterAnimals.vue: success
-  ShelterAnimals.vue --> ShelterMember: Success message
-else Export Data
-  ShelterMember -> ShelterAnimals.vue: Click Export
-  ShelterAnimals.vue -> ShelterAnimals.vue: Generate CSV from data
-  ShelterAnimals.vue --> ShelterMember: Download CSV file
+== 1. 進入收容所動物管理頁面 ==
+User -> ShelterAnimalsPage: 訪問 /shelter/animals
+activate ShelterAnimalsPage
+ShelterAnimalsPage -> ShelterAnimalsPage: onMounted()
+ShelterAnimalsPage -> ShelterAnimalsPage: 從 authStore 取得 shelter_id
+note right
+  取得當前使用者的 primary_shelter_id
+  檢查 role === 'SHELTER_MEMBER'
+end note
+
+== 2. 載入收容所動物列表 ==
+ShelterAnimalsPage -> ShelterAPI: getShelterAnimals(shelter_id, filters)
+activate ShelterAPI
+note right
+  filters 包含:
+  - status (狀態篩選)
+  - species (物種: CAT/DOG)
+  - sex (性別)
+  - keyword (關鍵字搜尋)
+  - vaccinated (是否接種疫苗)
+end note
+ShelterAPI -> ShelterBlueprint: GET /shelters/{shelter_id}/animals
+activate ShelterBlueprint
+
+ShelterBlueprint -> ShelterBlueprint: @jwt_required()\\n取得 current_user_id
+ShelterBlueprint -> ShelterService: check_shelter_permission(user_id, shelter_id)
+activate ShelterService
+ShelterService -> UserModel: User.query.get(user_id)
+activate UserModel
+UserModel -> DB: SELECT * FROM users WHERE user_id=?
+activate DB
+DB --> UserModel: 使用者資料
+deactivate DB
+UserModel --> ShelterService: User 物件
+deactivate UserModel
+
+ShelterService -> ShelterService: 檢查權限
+note right
+  檢查條件:
+  - user.role == SHELTER_MEMBER 
+    AND user.primary_shelter_id == shelter_id
+  - OR user.role == ADMIN
+end note
+
+alt 權限不足
+  ShelterService --> ShelterBlueprint: PermissionDeniedError
+  ShelterBlueprint --> ShelterAPI: 403 Forbidden
+  ShelterAPI --> ShelterAnimalsPage: 錯誤訊息
+  ShelterAnimalsPage --> User: alert('無權限')
 end
+deactivate ShelterService
+
+ShelterBlueprint -> ShelterModel: Shelter.query.filter_by(shelter_id, deleted_at=None).first()
+activate ShelterModel
+ShelterModel -> DB: SELECT * FROM shelters WHERE shelter_id=? AND deleted_at IS NULL
+activate DB
+DB --> ShelterModel: 收容所資料
+deactivate DB
+ShelterModel --> ShelterBlueprint: Shelter 物件
+deactivate ShelterModel
+
+== 3. 查詢動物列表 (含篩選) ==
+ShelterBlueprint -> AnimalModel: 建立查詢
+activate AnimalModel
+AnimalModel -> AnimalModel: query = Animal.query.filter(\\nshelter_id==?, deleted_at IS NULL)
+note right
+  基礎查詢:
+  - shelter_id = :shelter_id
+  - deleted_at IS NULL
+end note
+
+ShelterBlueprint -> ShelterBlueprint: 應用篩選條件
+
+alt 有 status 篩選
+  ShelterBlueprint -> AnimalModel: query.filter(status=?)
+  AnimalModel -> AnimalModel: 加入 WHERE status=?
+end
+
+alt 有 species 篩選
+  ShelterBlueprint -> AnimalModel: query.filter(species=?)
+  AnimalModel -> AnimalModel: 加入 WHERE species IN (...)
+end
+
+alt 有 sex 篩選
+  ShelterBlueprint -> AnimalModel: query.filter(sex=?)
+  AnimalModel -> AnimalModel: 加入 WHERE sex=?
+end
+
+alt 有 keyword 搜尋
+  ShelterBlueprint -> AnimalModel: query.filter(\\nname LIKE ? OR breed LIKE ? OR color LIKE ?)
+  AnimalModel -> AnimalModel: 加入模糊搜尋條件
+end
+
+alt 有 vaccinated 篩選
+  ShelterBlueprint -> AnimalModel: 子查詢 medical_records (疫苗記錄)
+  AnimalModel -> AnimalModel: 加入 EXISTS 子查詢
+end
+
+AnimalModel -> DB: SELECT * FROM animals WHERE ... ORDER BY created_at DESC LIMIT ? OFFSET ?
+activate DB
+note right
+  包含所有篩選條件和分頁
+  支援查看草稿狀態 (管理用)
+end note
+DB --> AnimalModel: animals 列表
+deactivate DB
+AnimalModel --> ShelterBlueprint: animals[]
+deactivate AnimalModel
+
+ShelterBlueprint -> ShelterBlueprint: 組裝回應 {animals, pagination}
+ShelterBlueprint --> ShelterAPI: 200 OK + {animals[], pagination}
+deactivate ShelterBlueprint
+ShelterAPI --> ShelterAnimalsPage: {animals, pagination}
+deactivate ShelterAPI
+ShelterAnimalsPage --> User: 顯示動物列表 (含篩選和分頁)
+deactivate ShelterAnimalsPage
+
+== 4. 批次操作 - 批次更新狀態 ==
+User -> ShelterAnimalsPage: 選擇多隻動物
+activate ShelterAnimalsPage
+ShelterAnimalsPage -> ShelterAnimalsPage: selectedAnimals.push(animal_id)
+note right
+  使用者可以:
+  - 點擊卡片空白區域選取
+  - 勾選左上角選擇框
+  - 使用全選功能
+end note
+
+User -> ShelterAnimalsPage: 點擊「批次操作」→ 選擇操作類型
+note right
+  批次狀態更新操作類型:
+  - draft: 變更為草稿 (SUBMITTED/PUBLISHED/RETIRED → DRAFT)
+  - submit: 提交審核 (DRAFT → SUBMITTED)
+  - publish: 發布上架 (SUBMITTED 或 DRAFT → PUBLISHED)
+  - retire: 下架 (PUBLISHED → RETIRED)
+  
+  ⚠️ 刪除不在批次 API 中:
+  前端逐一呼叫 deleteAnimal(id) 進行刪除
+  僅 DRAFT 狀態可刪除
+end note
+
+ShelterAnimalsPage -> ShelterAPI: batchUpdateAnimalStatus(shelter_id, {animal_ids, action})
+activate ShelterAPI
+ShelterAPI -> ShelterBlueprint: PATCH /shelters/{shelter_id}/animals/batch/status
+activate ShelterBlueprint
+
+ShelterBlueprint -> ShelterBlueprint: @jwt_required()\\n檢查權限
+ShelterBlueprint -> ShelterService: check_shelter_permission(user_id, shelter_id)
+activate ShelterService
+ShelterService -> ShelterService: 驗證收容所會員權限
+ShelterService --> ShelterBlueprint: 權限確認
+deactivate ShelterService
+
+ShelterBlueprint -> ShelterService: batch_update_animal_status(...)
+activate ShelterService
+note right
+  參數:
+  - shelter_id
+  - user_id
+  - animal_ids[]
+  - action (draft/submit/publish/retire)
+end note
+
+ShelterService -> ShelterService: 驗證操作類型
+ShelterService -> AnimalModel: 查詢所選動物
+activate AnimalModel
+AnimalModel -> DB: SELECT * FROM animals\\nWHERE animal_id IN (...)\\nAND shelter_id = ?\\nAND deleted_at IS NULL
+activate DB
+DB --> AnimalModel: animals[]
+deactivate DB
+AnimalModel --> ShelterService: animals[]
+deactivate AnimalModel
+
+ShelterService -> ShelterService: 驗證動物是否屬於該收容所
+alt 動物不存在或不屬於收容所
+  ShelterService --> ShelterBlueprint: ValidationError
+  ShelterBlueprint --> ShelterAPI: 400 Bad Request
+  ShelterAPI --> ShelterAnimalsPage: 錯誤訊息
+  ShelterAnimalsPage --> User: alert('操作失敗')
+end
+
+== 5. 執行批次狀態更新 ==
+loop 每隻動物
+  ShelterService -> ShelterService: 檢查當前狀態
+  
+  alt action == 'draft' AND status IN (SUBMITTED, PUBLISHED, RETIRED)
+    ShelterService -> AnimalModel: animal.status = DRAFT
+    activate AnimalModel
+    AnimalModel -> DB: UPDATE animals SET status='DRAFT', updated_at=NOW() WHERE animal_id=?
+    activate DB
+    note right
+      允許從已提交/已發布/已下架
+      變更回草稿狀態
+    end note
+    DB --> AnimalModel: 更新成功
+    deactivate DB
+    AnimalModel --> ShelterService: success_count++
+    deactivate AnimalModel
+  else action == 'submit' AND status == DRAFT
+    ShelterService -> AnimalModel: animal.status = SUBMITTED
+    activate AnimalModel
+    AnimalModel -> DB: UPDATE animals SET status='SUBMITTED', updated_at=NOW() WHERE animal_id=?
+    activate DB
+    DB --> AnimalModel: 更新成功
+    deactivate DB
+    AnimalModel --> ShelterService: success_count++
+    deactivate AnimalModel
+  else action == 'publish' AND status IN (SUBMITTED, DRAFT)
+    ShelterService -> AnimalModel: animal.status = PUBLISHED
+    activate AnimalModel
+    AnimalModel -> DB: UPDATE animals SET status='PUBLISHED', updated_at=NOW() WHERE animal_id=?
+    activate DB
+    note right
+      ⚠️ 允許從 DRAFT 或 SUBMITTED 直接發布
+      後端支援但前端 UI 只允許 SUBMITTED
+    end note
+    DB --> AnimalModel: 更新成功
+    deactivate DB
+    AnimalModel --> ShelterService: success_count++
+    deactivate AnimalModel
+  else action == 'retire' AND status == PUBLISHED
+    ShelterService -> AnimalModel: animal.status = RETIRED
+    activate AnimalModel
+    AnimalModel -> DB: UPDATE animals SET status='RETIRED', updated_at=NOW() WHERE animal_id=?
+    activate DB
+    DB --> AnimalModel: 更新成功
+    deactivate DB
+    AnimalModel --> ShelterService: success_count++
+    deactivate AnimalModel
+  else 狀態不符合
+    ShelterService -> ShelterService: failed_count++\\nerrors.append(錯誤訊息)
+  end
+end
+
+ShelterService -> AnimalModel: db.session.commit()
+activate AnimalModel
+AnimalModel -> DB: COMMIT
+activate DB
+DB --> AnimalModel: 提交成功
+deactivate DB
+AnimalModel --> ShelterService: 完成
+deactivate AnimalModel
+
+ShelterService -> ShelterService: 組裝結果
+note right
+  結果包含:
+  - success_count: 成功數量
+  - failed_count: 失敗數量
+  - errors[]: 錯誤訊息列表
+  - total: 總數
+end note
+ShelterService --> ShelterBlueprint: {success_count, failed_count, errors}
+deactivate ShelterService
+
+ShelterBlueprint --> ShelterAPI: 200 OK + 批次操作結果
+deactivate ShelterBlueprint
+ShelterAPI --> ShelterAnimalsPage: 操作結果
+deactivate ShelterAPI
+
+ShelterAnimalsPage -> ShelterAnimalsPage: 顯示操作結果
+ShelterAnimalsPage -> ShelterAnimalsPage: clearSelection()\\nloadAnimals() (重新載入)
+ShelterAnimalsPage --> User: alert('✅ 成功更新 {count} 隻動物')
+deactivate ShelterAnimalsPage
+
+== 6. 替代流程 - 單隻動物編輯 ==
+opt 使用者編輯單隻動物
+  User -> ShelterAnimalsPage: 點擊「編輯」按鈕
+  activate ShelterAnimalsPage
+  ShelterAnimalsPage -> ShelterAnimalsPage: 檢查編輯權限
+  note right
+    權限檢查:
+    - 草稿和已提交狀態可編輯
+    - 已發布和已領養不可編輯基本資料
+  end note
+  
+  ShelterAnimalsPage -> AnimalAPI: getAnimal(animal_id)
+  activate AnimalAPI
+  AnimalAPI -> AnimalBlueprint: GET /animals/{animal_id}
+  activate AnimalBlueprint
+  AnimalBlueprint -> AnimalService: get_animal(animal_id)
+  activate AnimalService
+  AnimalService -> AnimalModel: Animal.query.filter_by(animal_id).first()
+  activate AnimalModel
+  AnimalModel -> DB: SELECT * FROM animals WHERE animal_id=? AND deleted_at IS NULL
+  activate DB
+  DB --> AnimalModel: 動物資料
+  deactivate DB
+  AnimalModel --> AnimalService: Animal 物件
+  deactivate AnimalModel
+  AnimalService --> AnimalBlueprint: Animal
+  deactivate AnimalService
+  AnimalBlueprint --> AnimalAPI: 200 OK + animal
+  deactivate AnimalBlueprint
+  AnimalAPI --> ShelterAnimalsPage: animal 資料
+  deactivate AnimalAPI
+  
+  ShelterAnimalsPage -> ShelterAnimalsPage: 顯示編輯模態框\\n填充表單資料
+  ShelterAnimalsPage --> User: 顯示編輯表單
+  
+  User -> ShelterAnimalsPage: 修改資料並儲存
+  ShelterAnimalsPage -> AnimalAPI: updateAnimal(animal_id, formData)
+  activate AnimalAPI
+  AnimalAPI -> AnimalBlueprint: PATCH /animals/{animal_id}
+  activate AnimalBlueprint
+  AnimalBlueprint -> AnimalService: update_animal(animal_id, user, data)
+  activate AnimalService
+  AnimalService -> AnimalModel: 更新 Animal 資料
+  activate AnimalModel
+  AnimalModel -> DB: UPDATE animals SET name=?, breed=?, ... WHERE animal_id=?
+  activate DB
+  DB --> AnimalModel: 更新成功
+  deactivate DB
+  AnimalModel --> AnimalService: Animal 物件
+  deactivate AnimalModel
+  AnimalService -> AnimalModel: db.session.commit()
+  activate AnimalModel
+  AnimalModel -> DB: COMMIT
+  activate DB
+  DB --> AnimalModel: 提交成功
+  deactivate DB
+  AnimalModel --> AnimalService: 完成
+  deactivate AnimalModel
+  AnimalService --> AnimalBlueprint: Animal
+  deactivate AnimalService
+  AnimalBlueprint --> AnimalAPI: 200 OK + animal
+  deactivate AnimalBlueprint
+  AnimalAPI --> ShelterAnimalsPage: 更新成功
+  deactivate AnimalAPI
+  
+  ShelterAnimalsPage -> ShelterAnimalsPage: 關閉模態框\\nloadAnimals() (重新載入)
+  ShelterAnimalsPage --> User: alert('✅ 更新成功')
+  deactivate ShelterAnimalsPage
+end
+
+== 7. 替代流程 - 篩選重置 ==
+opt 使用者重置篩選
+  User -> ShelterAnimalsPage: 點擊「清除篩選」
+  activate ShelterAnimalsPage
+  ShelterAnimalsPage -> ShelterAnimalsPage: resetFilters()
+  note right
+    重置所有篩選條件:
+    - status = ''
+    - species = ''
+    - sex = ''
+    - keyword = ''
+    - vaccinated = false
+  end note
+  ShelterAnimalsPage -> ShelterAnimalsPage: loadAnimals() (重新查詢)
+  note right: 回到步驟 2 重新載入列表
+  ShelterAnimalsPage --> User: 顯示所有動物
+  deactivate ShelterAnimalsPage
+end
+
+== 8. 替代流程 - 導航到其他頁面 ==
+opt 使用者導航
+  User -> ShelterAnimalsPage: 點擊「單次送養」
+  activate ShelterAnimalsPage
+  ShelterAnimalsPage -> ShelterAnimalsPage: router.push('/my-rehomes')
+  ShelterAnimalsPage --> User: 導向個人送養頁面
+  deactivate ShelterAnimalsPage
+  
+  User -> ShelterAnimalsPage: 點擊「返回收容所管理」
+  activate ShelterAnimalsPage
+  ShelterAnimalsPage -> ShelterAnimalsPage: router.push('/shelter/dashboard')
+  ShelterAnimalsPage --> User: 導向收容所儀表板
+  deactivate ShelterAnimalsPage
+end
+
+note over User, DB
+  **後置條件:**
+  1. 收容所動物列表已載入並顯示
+  2. 支援多種篩選條件 (狀態、物種、性別、關鍵字、疫苗接種)
+  3. 批次操作已完成並更新狀態
+  4. 草稿狀態可編輯和刪除
+  5. 所有操作都有權限檢查
+  
+  **批次操作規則:**
+  - draft: SUBMITTED/PUBLISHED/RETIRED → DRAFT (變更為草稿)
+  - submit: DRAFT → SUBMITTED (提交審核)
+  - publish: SUBMITTED 或 DRAFT → PUBLISHED (發布上架)
+  - retire: PUBLISHED → RETIRED (下架)
+  - delete: 不在批次 API 中,前端逐一呼叫 deleteAnimal(),僅 DRAFT 可刪除
+  
+  **權限控制:**
+  - 收容所會員僅能管理所屬收容所的動物
+  - 管理員可管理所有收容所動物
+  - 檢查 user.primary_shelter_id === shelter_id
+  
+  **查詢優化:**
+  - 分頁查詢 (預設每頁 20 筆)
+  - 多條件篩選支援
+  - 模糊搜尋 (名稱、品種、顏色)
+  - 子查詢支援 (疫苗記錄檢查)
+  
+  **使用者體驗:**
+  - 多選支援 (點擊卡片、勾選框、全選)
+  - 批次操作選單 (下拉選擇)
+  - 即時顯示選取數量
+  - 操作結果反饋 (成功/失敗統計)
+end note
+
 @enduml

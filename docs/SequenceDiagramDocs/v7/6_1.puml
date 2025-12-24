@@ -1,32 +1,412 @@
-@startuml
-title Use Case 6.1: Notification View
-actor User
-participant NotificationCenter.vue
-participant NotificationBell.vue
-participant client.ts
-participant notifications.py
-participant notification_service.py
-database MySQL
+@startuml 使用案例6_1: 通知瀏覽
+title 使用案例6.1: 通知瀏覽流程
 
-User -> NotificationBell.vue: Click notification bell
-NotificationBell.vue -> client.ts: getNotifications()
-client.ts -> notifications.py: GET /notifications
-notifications.py -> notification_service.py: get_user_notifications()
-notification_service.py -> MySQL: SELECT notifications WHERE user_id
-MySQL --> notification_service.py: notifications[]
-notification_service.py --> notifications.py: notifications
-notifications.py --> client.ts: 200 OK
-client.ts --> NotificationBell.vue: notifications
-NotificationBell.vue --> User: Show notification dropdown
+actor 使用者 as User
+participant "NotificationBell.vue" as Bell
+participant "NotificationCenter.vue" as Center
+participant "useNotifications.ts" as Composable
+participant "client.ts" as API
+participant "notifications.py\n(blueprint)" as Blueprint
+participant "notification_service.py" as Service
+participant "others.py(Notification)(model)" as NotificationModel
+participant "user.py(model)" as UserModel
+database "MySQL" as DB
 
-User -> NotificationCenter.vue: Click See All
-NotificationCenter.vue -> client.ts: getNotifications(all)
-client.ts -> notifications.py: GET /notifications?page=1
-notifications.py -> notification_service.py: get_user_notifications()
-notification_service.py -> MySQL: SELECT notifications
-MySQL --> notification_service.py: notifications[]
-notification_service.py --> notifications.py: result
-notifications.py --> client.ts: 200 OK
-client.ts --> NotificationCenter.vue: notifications
-NotificationCenter.vue --> User: Display full list
+== Stage 1: 頁面初始化與輪詢啟動 ==
+User -> Bell: 頁面載入\n(Navbar 中的通知圖示)
+activate Bell
+Bell -> Composable: startPolling()\n啟動通知輪詢
+activate Composable
+Composable -> Composable: 設定輪詢間隔 (30秒)
+
+== Stage 2: 取得未讀通知數量 ==
+Composable -> API: fetchUnreadCount()
+activate API
+API -> Blueprint: GET /notifications/unread-count
+activate Blueprint
+Blueprint -> Blueprint: @jwt_required() 驗證 JWT token
+Blueprint -> Blueprint: 從 token 取得 current_user_id
+
+Blueprint -> Service: get_unread_count(user_id)
+activate Service
+Service -> NotificationModel: 查詢未讀數量
+activate NotificationModel
+NotificationModel -> DB: SELECT COUNT(*)\nFROM notifications\nWHERE recipient_id=?\nAND read=False
+activate DB
+DB --> NotificationModel: count
+deactivate DB
+NotificationModel --> Service: count
+deactivate NotificationModel
+Service --> Blueprint: unread_count
+deactivate Service
+
+Blueprint --> API: 200 OK {unread_count: N}
+deactivate Blueprint
+API --> Composable: unread_count
+deactivate API
+Composable -> Composable: unreadCount.value = N
+Composable --> Bell: 更新未讀徽章顯示
+deactivate Composable
+Bell -> Bell: 顯示未讀數量徽章\n(若 > 99 則顯示 "99+")
+Bell --> User: 顯示未讀數量 (紅色徽章)
+deactivate Bell
+
+note over Bell, Composable
+輪詢機制每 30 秒自動執行一次
+fetchUnreadCount() 更新未讀數量
+end note
+
+== Stage 3: 點擊通知鈴鐺開啟下拉選單 ==
+User -> Bell: 點擊通知鈴鐺圖示
+activate Bell
+Bell -> Bell: toggleDropdown()\nshowDropdown = true
+
+== Stage 4: 載入最新通知列表 ==
+Bell -> Composable: fetchNotifications()
+activate Composable
+Composable -> API: GET /notifications
+activate API
+API -> Blueprint: GET /notifications
+activate Blueprint
+Blueprint -> Blueprint: @jwt_required() 驗證
+Blueprint -> Blueprint: 取得 current_user_id
+
+== Stage 5: 查詢通知資料 ==
+Blueprint -> Service: list_notifications(user_id, read_filter=None, page=1, per_page=20)
+activate Service
+Service -> NotificationModel: 查詢通知列表
+activate NotificationModel
+NotificationModel -> DB: SELECT * FROM notifications\nWHERE recipient_id=?\nORDER BY created_at DESC\nLIMIT 20 OFFSET 0
+activate DB
+DB --> NotificationModel: notifications records
+deactivate DB
+NotificationModel --> Service: notifications[]\n(含 type, payload, read, created_at)
+deactivate NotificationModel
+
+Service -> Service: 組裝回應資料\n- 計算總頁數\n- 格式化日期\n- 包含分頁資訊
+Service --> Blueprint: {notifications[], total, page, per_page, pages}
+deactivate Service
+
+== Stage 6: 回傳通知列表 ==
+Blueprint --> API: 200 OK {notifications[], total}
+deactivate Blueprint
+API --> Composable: notifications[]
+deactivate API
+Composable -> Composable: notifications.value = notifications[]
+Composable --> Bell: notifications
+deactivate Composable
+
+== Stage 7: 渲染通知下拉選單 ==
+Bell -> Bell: 渲染通知列表\n- 未讀通知藍色背景\n- 顯示通知訊息\n- 顯示相對時間 (formatDistanceToNow)\n- 最多顯示 5 則
+Bell --> User: 顯示通知下拉選單
+deactivate Bell
+
+note over Bell
+通知類型顯示邏輯 (getNotificationMessage):
+- application_submitted: "您的申請已提交：{動物名}"
+- application_approved: "您的申請已通過：{動物名}"
+- application_rejected: "您的申請已被拒絕：{動物名}"
+- animal_published: "您的動物已發布：{動物名}"
+- animal_retired: "動物已下架：{動物名}"
+- system_notification: 自訂訊息
+end note
+
+== Stage 8: 使用者操作選擇 ==
+note over User, Bell
+使用者可以執行以下操作:
+1. 點擊通知項目 (標記為已讀)
+2. 點擊「全部標為已讀」
+3. 刪除個別通知
+4. 點擊「查看全部」進入通知中心
+5. 點擊外部區域關閉下拉選單
+end note
+
+alt 操作 1: 點擊通知項目
+
+== Stage 9a: 標記單一通知為已讀 ==
+User -> Bell: 點擊通知項目
+activate Bell
+Bell -> Bell: handleNotificationClick(notification)\n檢查 notification.read
+
+alt 通知未讀
+    Bell -> Composable: markAsRead(notification_id)
+    activate Composable
+    Composable -> API: POST /notifications/{id}/mark-read
+    activate API
+    API -> Blueprint: POST /notifications/{notification_id}/mark-read
+    activate Blueprint
+    Blueprint -> Blueprint: @jwt_required() 驗證
+    Blueprint -> Blueprint: 取得 current_user_id
+
+    == Stage 10a: 更新通知狀態 ==
+    Blueprint -> Service: mark_as_read(notification_id, user_id)
+    activate Service
+    Service -> NotificationModel: 查詢通知
+    activate NotificationModel
+    NotificationModel -> DB: SELECT * FROM notifications\nWHERE notification_id=?\nAND recipient_id=?
+    activate DB
+    DB --> NotificationModel: notification record
+    deactivate DB
+    NotificationModel --> Service: notification
+    deactivate NotificationModel
+
+    Service -> Service: 驗證權限\nIF notification不存在:\nraise ValueError('通知不存在')
+
+    Service -> NotificationModel: 更新通知狀態
+    activate NotificationModel
+    NotificationModel -> DB: UPDATE notifications\nSET read=True, read_at=NOW()\nWHERE notification_id=?
+    activate DB
+    DB --> NotificationModel: success
+    deactivate DB
+    NotificationModel --> Service: success
+    deactivate NotificationModel
+
+    Service -> Service: db.session.commit()
+    Service --> Blueprint: notification (read=True)
+    deactivate Service
+    Blueprint --> API: 200 OK {notification}
+    deactivate Blueprint
+    API --> Composable: notification
+    deactivate API
+
+    Composable -> Composable: 更新本地狀態\n- notifications[index] = updated\n- unreadCount -= 1
+    Composable --> Bell: success
+    deactivate Composable
+end
+
+Bell -> Bell: closeDropdown()\nshowDropdown = false
+Bell --> User: 關閉下拉選單並導航 (TODO)
+deactivate Bell
+
+else 操作 2: 全部標為已讀
+
+== Stage 9b: 標記所有通知為已讀 ==
+User -> Bell: 點擊「全部標為已讀」
+activate Bell
+Bell -> Composable: markAllAsRead()
+activate Composable
+Composable -> API: POST /notifications/mark-all-read
+activate API
+API -> Blueprint: POST /notifications/mark-all-read
+activate Blueprint
+Blueprint -> Blueprint: @jwt_required() 驗證
+Blueprint -> Blueprint: 取得 current_user_id
+
+== Stage 10b: 批次更新通知狀態 ==
+Blueprint -> Service: mark_all_as_read(user_id)
+activate Service
+Service -> NotificationModel: 批次更新通知
+activate NotificationModel
+NotificationModel -> DB: UPDATE notifications\nSET read=True, read_at=NOW()\nWHERE recipient_id=?\nAND read=False
+activate DB
+DB --> NotificationModel: updated_count
+deactivate DB
+NotificationModel --> Service: updated_count
+deactivate NotificationModel
+
+Service -> Service: db.session.commit()
+Service --> Blueprint: updated_count
+deactivate Service
+Blueprint --> API: 200 OK {message, updated_count}
+deactivate Blueprint
+API --> Composable: {updated_count}
+deactivate API
+
+Composable -> Composable: 更新本地狀態\n- 所有 notifications.read = true\n- unreadCount = 0
+Composable --> Bell: success
+deactivate Composable
+Bell -> Bell: 重新渲染列表\n所有通知顯示為已讀
+Bell --> User: 顯示成功訊息
+deactivate Bell
+
+else 操作 3: 刪除通知
+
+== Stage 9c: 刪除個別通知 ==
+User -> Bell: 點擊通知的刪除按鈕 (×)
+activate Bell
+Bell -> Composable: deleteNotification(notification_id)
+activate Composable
+Composable -> API: DELETE /notifications/{id}
+activate API
+API -> Blueprint: DELETE /notifications/{notification_id}
+activate Blueprint
+Blueprint -> Blueprint: @jwt_required() 驗證
+Blueprint -> Blueprint: 取得 current_user_id
+
+== Stage 10c: 刪除通知 ==
+Blueprint -> Service: delete_notification(notification_id, user_id)
+activate Service
+Service -> NotificationModel: 查詢通知
+activate NotificationModel
+NotificationModel -> DB: SELECT * FROM notifications\nWHERE notification_id=?\nAND recipient_id=?
+activate DB
+DB --> NotificationModel: notification record
+deactivate DB
+NotificationModel --> Service: notification
+deactivate NotificationModel
+
+Service -> Service: 驗證權限\nIF notification不存在:\nraise ValueError('通知不存在')
+
+Service -> NotificationModel: 刪除通知
+activate NotificationModel
+NotificationModel -> DB: DELETE FROM notifications\nWHERE notification_id=?
+activate DB
+DB --> NotificationModel: success
+deactivate DB
+NotificationModel --> Service: success
+deactivate NotificationModel
+
+Service -> Service: db.session.commit()
+Service --> Blueprint: success
+deactivate Service
+Blueprint --> API: 200 OK {message: '通知已刪除'}
+deactivate Blueprint
+API --> Composable: success
+deactivate API
+
+Composable -> Composable: 從本地列表移除\n- notifications.splice(index, 1)\n- 若未讀則 unreadCount -= 1
+Composable --> Bell: success
+deactivate Composable
+Bell -> Bell: 重新渲染列表\n移除該通知項目
+Bell --> User: 通知消失
+deactivate Bell
+
+else 操作 4: 進入通知中心
+
+== Stage 9d: 導航至通知中心頁面 ==
+User -> Bell: 點擊「查看全部」連結
+activate Bell
+Bell -> Bell: router.push('/notifications')
+Bell --> User: 導航至通知中心
+deactivate Bell
+
+User -> Center: 訪問 /notifications
+activate Center
+
+== Stage 10d: 載入完整通知列表 ==
+Center -> Composable: fetchNotifications()
+activate Composable
+Composable -> API: GET /notifications?page=1&per_page=50
+activate API
+API -> Blueprint: GET /notifications?page=1&per_page=50
+activate Blueprint
+Blueprint -> Blueprint: @jwt_required() 驗證
+Blueprint -> Service: list_notifications(user_id, read_filter=None, page=1, per_page=50)
+activate Service
+Service -> NotificationModel: 查詢完整通知列表
+activate NotificationModel
+NotificationModel -> DB: SELECT * FROM notifications\nWHERE recipient_id=?\nORDER BY created_at DESC\nLIMIT 50 OFFSET 0
+activate DB
+DB --> NotificationModel: notifications records
+deactivate DB
+NotificationModel --> Service: notifications[]
+deactivate NotificationModel
+Service --> Blueprint: {notifications[], total, pages}
+deactivate Service
+Blueprint --> API: 200 OK
+deactivate Blueprint
+API --> Composable: notifications[]
+deactivate API
+Composable --> Center: notifications[]
+deactivate Composable
+
+== Stage 11d: 渲染完整通知列表 ==
+Center -> Center: 渲染完整通知列表\n- 分頁控制\n- 篩選按鈕 (全部/未讀/已讀)\n- 標記已讀按鈕\n- 刪除按鈕\n- 通知詳細內容
+Center --> User: 顯示完整通知中心
+deactivate Center
+
+note over Center
+通知中心功能:
+1. 分頁瀏覽 (每頁 50 則)
+2. 篩選 (全部/未讀/已讀)
+3. 單一標記已讀
+4. 單一刪除
+5. 點擊通知查看詳情並標記已讀
+6. 顯示通知類型圖示
+7. 顯示相對時間
+end note
+
+end
+
+== Stage 12: 錯誤處理 ==
+note over Bell, Service
+可能的錯誤情況:
+1. 401 Unauthorized: JWT token 無效或過期
+   → 重導向到登入頁
+   
+2. 404 Not Found: 通知不存在
+   → 顯示「通知不存在」並重新載入列表
+   
+3. 403 Forbidden: 嘗試操作他人的通知
+   → 顯示「無權限操作此通知」
+   
+4. 500 Internal Server Error: 資料庫錯誤
+   → 顯示「操作失敗，請稍後再試」
+
+錯誤處理流程:
+- API Client 攔截錯誤
+- Composable 設定 error.value
+- Component 顯示錯誤訊息
+- 重新載入通知列表
+end note
+
+== Stage 13: 輪詢機制 ==
+note over Bell, Composable
+輪詢機制運作:
+1. 頁面載入時啟動 startPolling()
+2. 立即執行一次 fetchUnreadCount()
+3. 每 30 秒自動執行 fetchUnreadCount()
+4. 頁面卸載時停止 stopPolling()
+5. 更新 unreadCount 並刷新徽章
+
+生命週期:
+- onMounted: startPolling()
+- onUnmounted: stopPolling()
+- 使用 setInterval 實現定時輪詢
+end note
+
+== Stage 14: 通知類型與格式化 ==
+note over Composable, Service
+Notification Model 欄位:
+- notification_id: 通知 ID (BIGINT)
+- recipient_id: 接收者 user_id
+- actor_id: 執行動作者 user_id (可為 NULL)
+- type: 通知類型字串
+- payload: JSON 格式額外資料
+- read: 已讀狀態 (Boolean)
+- created_at: 建立時間
+- read_at: 已讀時間 (可為 NULL)
+
+通知類型 (type):
+- application_submitted: 申請已提交
+- application_approved: 申請已核准
+- application_rejected: 申請已拒絕
+- application_under_review: 申請審核中
+- animal_published: 動物已發布
+- animal_retired: 動物已下架
+- animal_status_changed: 動物狀態變更
+- job_completed: 背景任務完成
+- system_notification: 系統通知
+
+格式化規則:
+- 時間: formatDistanceToNow (相對時間)
+- 未讀數量: > 99 顯示 "99+"
+- 顏色: 未讀藍色背景 (bg-blue-50)
+end note
+
+== Stage 15: Click Outside 關閉機制 ==
+note over Bell
+v-click-outside directive:
+1. 監聽 document 的 click 事件
+2. 判斷點擊是否在下拉選單外部
+3. 若在外部則執行 closeDropdown()
+4. 使用 setTimeout 延遲註冊避免衝突
+5. onUnmounted 時移除事件監聽器
+
+實現邏輯:
+- mounted: 註冊 click 事件 (延遲 0ms)
+- unmounted: 移除 click 事件
+- 確保不與 toggleDropdown 衝突
+end note
+
 @enduml
