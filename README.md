@@ -4,20 +4,20 @@
 
 [![License](https://img.shields.io/badge/license-Educational-blue.svg)](LICENSE)
 [![Docker](https://img.shields.io/badge/docker-supported-2496ED.svg)](https://www.docker.com/)
-[![GCP](https://img.shields.io/badge/GCP-deployable-4285F4.svg)](https://cloud.google.com/)
 
 ---
 
 ## 📑 目錄
 
-- [快速開始](#快速開始)
-- [技術架構](#技術架構)
-- [主要功能](#主要功能模組)
-- [部署指南](#部署)
-- [API 文檔](#api-文檔)
-- [測試帳號](#測試帳號)
-- [開發指南](#開發指南)
-- [專案文檔](#專案文檔)
+- [快速開始](#-快速開始)
+- [技術架構](#️-技術架構)
+- [專案結構](#-專案結構)
+- [主要功能](#-主要功能模組)
+- [API 文檔](#-api-文檔)
+- [測試帳號](#-測試帳號)
+- [開發指南](#-開發指南)
+- [專案文檔](#-專案文檔)
+- [版本歷史](#-版本歷史)
 
 ---
 
@@ -32,24 +32,27 @@
 ### 一鍵啟動（使用 Docker）
 
 ```bash
-# 0. 移除先前部屬docker(可選)
+# 0. 進入專案目錄
+cd code/project
+
+# 1. 移除先前部屬docker(可選)
 docker compose down -v
 
-# 1. 複製環境變數檔案
+# 2. 複製環境變數檔案
 cp .env.example .env
 cp backend/.env.example backend/.env
 cp frontend/.env.example frontend/.env
 
-# 2. 啟動所有服務
+# 3. 啟動所有服務
 docker compose up -d
 
-# 3. 初始化資料庫（首次啟動）
+# 4. 初始化資料庫（首次啟動）
 docker compose exec backend flask db upgrade
 
-# 4. 建立測試帳號
+# 5. 建立測試帳號
 docker compose exec backend python create_test_accounts.py
 
-# 5. 訪問服務
+# 6. 訪問服務
 # 前端: http://localhost:5173
 # 後端 API: http://localhost:5000
 # API 文檔: http://localhost:5000/api/docs
@@ -75,21 +78,21 @@ docker compose exec backend python create_test_accounts.py
 ## 🏗️ 技術架構
 
 ### 前端 (Frontend)
-- **框架**: Vue 3.4.21 + TypeScript 5.x + Vite 5.4.21
+- **框架**: Vue 3.4.21 + TypeScript 5.4.2 + Vite 5.1.6
 - **狀態管理**: Pinia 2.x
 - **路由管理**: Vue Router 4.x (含角色型路由守衛)
 - **表單驗證**: vee-validate + zod
 - **UI 框架**: Tailwind CSS 3.x
-- **日期處理**: date-fns (含 i18n zh-TW)
-- **HTTP 客戶端**: Axios
+- **日期處理**: date-fns 4.1.0 (含 i18n zh-TW)
+- **HTTP 客戶端**: Axios 1.6.7
 - **圖片上傳**: 自定義 FileUploader 組件
 
 ### 後端 (Backend)
-- **框架**: Flask 3.0.0 + flask-smorest (OpenAPI)
+- **框架**: Flask 3.0.0 + flask-smorest 0.42.3 (OpenAPI)
 - **ORM**: SQLAlchemy 2.x
 - **遷移工具**: Alembic
-- **認證**: JWT (flask-jwt-extended)
-- **任務隊列**: Celery 5.x
+- **認證**: JWT (flask-jwt-extended 4.5.3)
+- **任務佇列**: Celery 5.3.4
 - **消息隊列**: Redis 7.x
 - **API 文檔**: Swagger UI / ReDoc
 
@@ -107,88 +110,46 @@ docker compose exec backend python create_test_accounts.py
 ## 📁 專案結構
 
 ```
-proj_new/
-├── backend/              # Flask 後端應用
-│   ├── app/             # 應用主目錄
-│   │   ├── blueprints/  # API 路由模組
-│   │   │   ├── auth.py          # 身份驗證
-│   │   │   ├── animals.py       # 動物管理
-│   │   │   ├── applications.py  # 申請管理
-│   │   │   ├── notifications.py # 通知系統
-│   │   │   ├── jobs.py          # 任務管理
-│   │   │   ├── shelters.py      # 收容所管理
-│   │   │   └── admin.py         # 管理員功能
-│   │   ├── models/      # SQLAlchemy 模型
-│   │   │   ├── user.py          # 用戶模型
-│   │   │   ├── animal.py        # 動物模型
-│   │   │   ├── application.py   # 申請模型
-│   │   │   └── others.py        # 其他模型
-│   │   ├── services/    # 業務邏輯層
-│   │   │   └── notification_service.py  # 通知服務
-│   │   ├── utils/       # 工具函數
-│   │   └── __init__.py  # Flask 應用工廠
-│   ├── migrations/      # Alembic 遷移檔案
-│   ├── config.py        # 設定檔
-│   ├── requirements.txt # Python 依賴
-│   └── run.py           # 應用入口
-├── frontend/            # Vue 3 前端應用
-│   ├── src/
-│   │   ├── api/         # API 客戶端模組
-│   │   │   ├── client.ts        # Axios 客戶端
-│   │   │   ├── animals.ts       # 動物 API
-│   │   │   ├── applications.ts  # 申請 API
-│   │   │   ├── notifications.ts # 通知 API
-│   │   │   └── jobs.ts          # 任務 API
-│   │   ├── assets/      # 靜態資源
-│   │   ├── components/  # Vue 組件
-│   │   │   ├── layout/          # 佈局組件
-│   │   │   ├── uploads/         # 上傳組件
-│   │   │   └── NotificationBell.vue  # 通知鈴鐺
-│   │   ├── composables/ # Composition API 邏輯
-│   │   │   ├── useNotifications.ts  # 通知邏輯
-│   │   │   └── useUpload.ts     # 上傳邏輯
-│   │   ├── pages/       # 頁面組件
-│   │   │   ├── Animals.vue          # 動物列表
-│   │   │   ├── AnimalDetail.vue     # 動物詳情
-│   │   │   ├── RehomeForm.vue       # 送養表單
-│   │   │   ├── MyRehomes.vue        # 我的送養
-│   │   │   ├── AdminUsers.vue       # 用戶管理
-│   │   │   ├── Jobs.vue             # 任務列表
-│   │   │   └── NotificationCenter.vue  # 通知中心
-│   │   ├── router/      # 路由設定
-│   │   │   └── index.ts         # 路由配置 (含角色守衛)
-│   │   ├── stores/      # Pinia 狀態管理
-│   │   │   └── auth.ts          # 認證狀態
-│   │   ├── types/       # TypeScript 類型定義
-│   │   └── App.vue      # 根組件
-│   ├── package.json
-│   └── vite.config.ts
-├── docker/              # Docker 相關檔案
-│   ├── backend.Dockerfile
-│   ├── frontend.Dockerfile
-│   └── nginx.conf
-├── docker-compose.yml   # Docker Compose 設定
-├── docs/                # 專案文檔
-│   ├── api/
-│   │   └── README.md    # API 使用指南
-│   └── development.md   # 開發指南
-├── TEST_ACCOUNTS.md     # 測試帳號文檔
-├── DRAFT_SAVE_FIX.md    # 草稿儲存修復說明
-├── NOTIFICATION_DROPDOWN_FIX.md  # 通知下拉選單修復說明
-└── README.md            # 專案說明
+code/
+├── project/              # 主要專案代碼
+│   ├── backend/          # Flask 後端應用
+│   │   ├── app/          # 應用主目錄
+│   │   │   ├── blueprints/    # API 路由模組
+│   │   │   ├── models/        # SQLAlchemy 模型
+│   │   │   ├── services/      # 業務邏輯層
+│   │   │   └── utils/         # 工具函數
+│   │   ├── migrations/        # Alembic 遷移檔案
+│   │   ├── config.py          # 設定檔
+│   │   ├── requirements.txt   # Python 依賴
+│   │   └── run.py             # 應用入口
+│   ├── frontend/         # Vue 3 前端應用
+│   │   ├── src/
+│   │   │   ├── api/           # API 客戶端模組
+│   │   │   ├── components/    # Vue 組件
+│   │   │   ├── composables/   # Composition API
+│   │   │   ├── pages/         # 頁面組件
+│   │   │   ├── router/        # 路由設定
+│   │   │   ├── stores/        # Pinia 狀態管理
+│   │   │   └── types/         # TypeScript 類型
+│   │   └── package.json
+│   ├── docker/           # Docker 相關檔案
+│   ├── BatchUploadExample/    # 批次上傳範例
+│   └── docker-compose.yml     # Docker Compose 設定
+└── docs/                 # 完整專案文檔
+    ├── api-tests/        # API 測試報告
+    ├── fixes/            # 問題修復文檔
+    ├── guides/           # 使用指南
+    ├── logs/             # 系統日誌
+    ├── refactoring/      # 重構文檔
+    ├── reports/          # 各類報告
+    ├── scripts/          # 測試腳本
+    └── test-plans/       # 測試計劃
 ```
 
 <details>
 <summary><b>查看完整目錄結構</b></summary>
 
-詳細的檔案結構請參考專案根目錄，主要包含：
-- `backend/app/blueprints/` - API 路由（auth, animals, applications 等）
-- `backend/app/models/` - 資料庫模型
-- `backend/app/services/` - 業務邏輯層
-- `frontend/src/pages/` - Vue 頁面組件
-- `frontend/src/api/` - API 客戶端
-- `docker/` - Dockerfile 配置
-- `docs/` - 專案文檔
+詳細的檔案結構請參考 [FOLDER_STRUCTURE.md](code/docs/FOLDER_STRUCTURE.md)
 
 </details>
 
@@ -264,7 +225,7 @@ API 文檔使用 OpenAPI 3.0 規範，可通過以下方式訪問：
 - ReDoc: http://localhost:5000/api/redoc
 - OpenAPI JSON: http://localhost:5000/api/openapi.json
 
-詳細的 API 使用指南請參考 [docs/api/README.md](docs/api/README.md)
+詳細的 API 說明請訪問 Swagger UI: http://localhost:5000/api/docs
 
 ### 主要 API 端點
 
@@ -312,10 +273,11 @@ API 文檔使用 OpenAPI 3.0 規範，可通過以下方式訪問：
 
 ```bash
 # Docker 環境（推薦）
-docker-compose exec backend python create_test_accounts.py
+cd code/project
+docker compose exec backend python create_test_accounts.py
 ```
 
-詳細說明請參考: [CREATE_TEST_ACCOUNTS_GUIDE.md](CREATE_TEST_ACCOUNTS_GUIDE.md)
+詳細說明請參考: [CREATE_TEST_ACCOUNTS_GUIDE.md](code/docs/guides/CREATE_TEST_ACCOUNTS_GUIDE.md)
 
 #### 可用測試帳號
 
@@ -336,128 +298,82 @@ docker-compose exec backend python create_test_accounts.py
 
 **注意**: 
 - 測試帳號僅供開發環境使用，生產環境請使用強密碼
-- 完整的測試帳號清單和問題排查請參考 [TEST_ACCOUNTS.md](TEST_ACCOUNTS.md)
+- 詳細的測試帳號建立流程請參考 [CREATE_TEST_ACCOUNTS_GUIDE.md](code/docs/guides/CREATE_TEST_ACCOUNTS_GUIDE.md)
 
 ---
 
-## 🚀 部署
+## 👨‍💻 開發指南
 
-### 本地開發部署
+### 本地開發環境設置
 
-使用 Docker Compose 進行本地開發，詳見上方「快速開始」章節。
-
-### GCP 雲端部署
-
-專案支援低成本 GCP 部署方案（月費約 $40-50 USD），適合小型專案或測試環境。
-
-#### 部署方案特點
-
-- ✅ **單一 VM 架構** - 所有服務運行在 e2-small 虛擬機
-- ✅ **容器化部署** - 使用 Docker Compose 管理服務
-- ✅ **成本優化** - 不使用 Cloud SQL/Memorystore 等託管服務
-- ✅ **生產就緒** - 包含 Nginx 反向代理、自動備份、監控
-
-#### 快速部署指令
-
+**後端開發**:
 ```bash
-# 1. 建立 GCP VM（e2-small, Ubuntu 20.04）
-gcloud compute instances create pet-adoption-vm \
-  --zone=asia-east1-a \
-  --machine-type=e2-small \
-  --boot-disk-size=20GB \
-  --tags=http-server
+cd code/project/backend
 
-# 2. 設定防火牆（僅需開放 80/443）
-gcloud compute firewall-rules create allow-http-https \
-  --allow=tcp:80,tcp:443 \
-  --target-tags=http-server
+# 建立虛擬環境
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
 
-# 3. SSH 進入 VM 並安裝 Docker
-sudo apt update && sudo apt install -y docker.io docker-compose git
+# 安裝依賴
+pip install -r requirements.txt
 
-# 4. 複製專案並配置環境變數
-git clone <your-repo-url>
-cd proj_new
-cp .env.gcp.example .env.gcp
-# 編輯 .env.gcp 填入實際配置（替換 YOUR_VM_IP 為實際 IP）
+# 設定環境變數
+cp .env.example .env
 
-# 5. 首次部署或 Dockerfile 有改動(可選)
-docker-compose --env-file .env.gcp -f docker-compose-gcp.yml build --no-cache
-
-# 6. 構建並啟動服務
-docker-compose --env-file .env.gcp -f docker-compose-gcp.yml up -d
-
-# 6. 初始化資料庫
-docker-compose --env-file .env.gcp -f docker-compose-gcp.yml exec backend flask db upgrade
-docker-compose --env-file .env.gcp -f docker-compose-gcp.yml exec backend python create_test_accounts.py
+# 運行開發服務器
+flask run --debug
 ```
 
-#### 成本預估（台灣地區 asia-east1）
+**前端開發**:
+```bash
+cd code/project/frontend
 
-| 項目 | 規格 | 月費（USD） |
-|------|------|------------|
-| Compute Engine | e2-small (2 vCPU, 2GB RAM) | $15-20 |
-| 持久磁碟 | 50GB SSD | $8 |
-| 網路流量 | 1TB | $12 |
-| 靜態外部 IP | 標準 IP | $3 |
-| **總計** | | **$38-43** |
+# 安裝依賴
+npm install
 
-#### 詳細部署文檔
+# 運行開發服務器
+npm run dev
+```
 
-- **完整部署指南**: [LOW_COST_DEPLOYMENT.md](LOW_COST_DEPLOYMENT.md)
-  - VM 規格選擇與建立
-  - Nginx 反向代理設定
-  - SSL 憑證配置 (Let's Encrypt)
-  - 自動備份腳本
-  - 監控與告警設定
-  - 成本優化技巧（Preemptible VM、自動關機）
-
-- **配置檔案**:
-  - `docker-compose-gcp.yml` - GCP 生產環境 Docker Compose 配置
-  - `.env.gcp.example` - GCP 環境變數範例
-
-#### 重要注意事項
-
-⚠️ **外部 IP 設定**
-- GCP 預設使用臨時 IP（VM 重啟會改變）
-- **強烈建議**保留靜態 IP ($3/月) 避免頻繁修改配置
-- 或使用免費域名服務（如 Freenom）+ DNS 指向
-
-⚠️ **防火牆規則**
-- 僅需開放 80 (HTTP) 和 443 (HTTPS)
-- SSH (22) 建議限制來源 IP
-- 所有內部服務（MySQL/Redis/MinIO）僅容器內訪問
-
-⚠️ **資料備份**
-- 定期備份 MySQL 資料庫和 MinIO 物件儲存
-- 使用 Cloud Storage 存放備份（詳見 LOW_COST_DEPLOYMENT.md）
-
-詳細的企業級部署指南請參考 [GCP_DEPLOYMENT.md](GCP_DEPLOYMENT.md)（使用託管服務，成本較高）
-
----
-
-## 🧪 測試
-
-### 後端測試
+### 資料庫遷移
 
 ```bash
-cd backend
+# 建立遷移
+docker compose exec backend flask db migrate -m "描述"
+
+# 執行遷移
+docker compose exec backend flask db upgrade
+
+# 回退遷移
+docker compose exec backend flask db downgrade
+```
+
+### Celery 背景任務
+
+Celery Worker 用於處理異步任務（郵件發送、批次處理等）
+
+```bash
+# 啟動 Celery Worker
+docker compose up celery-worker
+
+# 查看任務日誌
+docker compose logs -f celery-worker
+```
+
+### 測試
+
+**後端測試**:
+```bash
+cd code/project/backend
 pytest tests/
 ```
 
-### 前端測試
-
+**前端測試**:
 ```bash
-cd frontend
+cd code/project/frontend
 npm run test:unit      # 單元測試
 npm run test:e2e       # E2E 測試
 ```
-
----
-
-## 💻 開發指南
-
-詳細的開發指南請參考 [docs/development.md](docs/development.md)
 
 ### 常見問題
 
@@ -473,75 +389,76 @@ npm run test:e2e       # E2E 測試
 UPDATE users SET deleted_at = NULL WHERE email = 'admin@test.com';
 ```
 
-更多問題請參考 [docs/development.md](docs/development.md) 的常見問題區塊。
+更多問題請參考 [code/docs/fixes/ISSUES_AND_SOLUTIONS.md](code/docs/fixes/ISSUES_AND_SOLUTIONS.md) 的問題解決方案。
 
-### 本地開發設置
-
-#### 後端設置
-
-```bash
-cd backend
-
-# 建立虛擬環境
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-
-# 安裝依賴
-pip install -r requirements.txt
-
-# 設定環境變數
-cp .env.example .env
-
-# 初始化資料庫
-flask db upgrade
-
-# 啟動開發伺服器
-python run.py
-```
-
-#### 前端設置
-
-```bash
-cd frontend
-
-# 安裝依賴
-npm install
-
-# 啟動開發伺服器
-npm run dev
-
-# 建立生產版本
-npm run build
-```
+詳細的開發指南請參考：
+- [開發文檔](code/docs/development.md)
+- [Celery Worker 指南](code/docs/guides/CELERY_WORKER_GUIDE.md)
+- [任務審批指南](code/docs/guides/JOB_APPROVAL_GUIDE.md)
+- [通知觸發指南](code/docs/guides/NOTIFICATION_TRIGGERS_GUIDE.md)
 
 ---
 
 ## 📚 專案文檔
 
-### 開發文檔
-- [API 文檔](docs/api/README.md) - 完整的 API 使用指南
-- [開發指南](docs/development.md) - 開發流程和常見問題
-- [測試帳號](TEST_ACCOUNTS.md) - 測試帳號清單和問題排查
-- [快速生成測試帳號](CREATE_TEST_ACCOUNTS_GUIDE.md) - 測試帳號生成腳本使用指南
-- [Docker 使用指南](DOCKER_GUIDE.md) - Docker 部署和開發指南
+### 核心文檔
+- [專案概述](code/docs/README.md) - 專案整體說明
+- [資料夾結構](code/docs/FOLDER_STRUCTURE.md) - 完整目錄結構
+- [開發文檔](code/docs/development.md) - 開發環境與流程
+- [序列圖說明](code/docs/SEQUENCE_DIAGRAMS_README.md) - 系統互動流程
 
-### 部署文檔
-- [GCP 低成本部署指南](LOW_COST_DEPLOYMENT.md) - 單一 VM 部署方案（月費 $40-50）
-- [GCP 企業級部署指南](GCP_DEPLOYMENT.md) - 使用託管服務的高可用架構
+### 測試與驗證
+- [API 測試報告](code/docs/api-tests/API_TEST_REPORT.md)
+- [API 驗證報告](code/docs/api-tests/API_VALIDATION_REPORT.md)
+- [前端測試報告](code/docs/reports/FRONTEND_TEST_REPORT.md)
+- [初始化測試報告](code/docs/reports/INITIALIZATION_TEST_REPORT.md)
+- [測試計劃](code/docs/test-plans/) - Phase 1-9 完整測試指南
+
+### 問題修復
+- [修復記錄](code/docs/fixes/FIXES.md) - 所有修復的問題
+- [問題與解決方案](code/docs/fixes/ISSUES_AND_SOLUTIONS.md)
+- [草稿儲存修復](code/docs/fixes/DRAFT_SAVE_FIX.md)
+- [通知下拉選單修復](code/docs/fixes/NOTIFICATION_DROPDOWN_FIX.md)
+- [時區遷移](code/docs/fixes/TIMEZONE_MIGRATION.md)
+
+### 重構文檔
+- [重構指南](code/docs/refactoring/REFACTORING_GUIDE.md)
+- [重構進度](code/docs/refactoring/REFACTORING_PROGRESS.md)
+- [重構完成報告](code/docs/refactoring/REFACTORING_COMPLETE.md)
+- [最終重構報告](code/docs/refactoring/REFACTORING_FINAL_REPORT.md)
+
+### 系統報告
+- [架構審查](code/docs/reports/ARCHITECTURE_REVIEW.md)
+- [部署成功報告](code/docs/reports/DEPLOYMENT_SUCCESS.md)
+- [實作計劃](code/docs/reports/IMPLEMENTATION_PLAN.md)
+- [系統修復報告](code/docs/reports/SYSTEM_FIXES_REPORT.md)
+- [問題狀態報告](code/docs/reports/ISSUES_STATUS_REPORT.md)
+
+### 使用指南
+- [Celery Worker 指南](code/docs/guides/CELERY_WORKER_GUIDE.md)
+- [建立測試帳號指南](code/docs/guides/CREATE_TEST_ACCOUNTS_GUIDE.md)
+- [任務審批指南](code/docs/guides/JOB_APPROVAL_GUIDE.md)
+- [通知觸發指南](code/docs/guides/NOTIFICATION_TRIGGERS_GUIDE.md)
 
 ---
 
-## 📝 最近更新 (2025-10-26)
+## 📋 版本歷史
 
-### 新增功能
-- ✅ **通知系統完整實作** - 7 種通知類型，自動觸發機制
-- ✅ **任務審批系統** - 管理員可審批/拒絕背景任務
-- ✅ **用戶管理介面** - 搜尋、篩選、封禁功能
-- ✅ **草稿持久化** - 草稿儲存到資料庫，避免資料遺失
-- ✅ **通知下拉選單** - 快速檢視未讀通知
+- **v0.3.0** (2024-12-25) - 時區修正、MinIO 整合、文檔完善
+- **v0.2.0** (2024-11-15) - 通知系統、任務審批、用戶管理完整實作
+- **v0.1.0** (2024-10-01) - 核心功能實作（動物管理、申請審核）
 
-### 修復問題
-- ✅ 通知下拉選單開啟後立即關閉
+---
+
+## 📄 授權
+
+本專案僅供教育用途使用。
+
+---
+
+## 🙏 致謝
+
+感謝所有貢獻者對本專案的支持與協助。
 - ✅ 草稿只儲存到 localStorage 問題
 - ✅ AdminUsers.vue 編譯錯誤
 - ✅ 軟刪除帳號登入問題
@@ -567,7 +484,7 @@ npm run build
 
 ## 📋 版本歷史
 
-- v0.3.0 (2025-10-26) - 通知系統、任務審批、用戶管理完整實作
+- v0.3.0 (2024-10-26) - 通知系統、任務審批、用戶管理完整實作
   - 新增通知系統 (7 種通知類型)
   - 新增任務審批流程
   - 新增用戶管理介面
