@@ -7,6 +7,7 @@ from typing import Optional, Dict, Any, Tuple
 from app import db
 from app.models.user import User, UserRole
 from app.models.others import Job, JobStatus
+from app.utils.datetime_helper import get_naive_taipei_now
 from app.exceptions import (
     PermissionDeniedError, NotFoundError, ValidationError, ConflictError
 )
@@ -95,7 +96,7 @@ class UserService:
             user.email = data['email']
             user.verified = False  # 需要重新驗證
         
-        user.updated_at = datetime.utcnow()
+        user.updated_at = get_naive_taipei_now()
         db.session.commit()
         
         return user
@@ -141,7 +142,7 @@ class UserService:
         
         # 更新密碼變更時間 (如果欄位存在)
         if hasattr(user, 'password_changed_at'):
-            user.password_changed_at = datetime.utcnow()
+            user.password_changed_at = get_naive_taipei_now()
         
         # 重置失敗登入次數
         if hasattr(user, 'failed_login_attempts'):

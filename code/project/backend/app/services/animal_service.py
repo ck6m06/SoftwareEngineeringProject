@@ -3,6 +3,7 @@ Animal Service - 動物業務邏輯服務
 集中管理所有動物相關的業務邏輯
 """
 from datetime import datetime
+from app.utils.datetime_helper import get_naive_taipei_now
 from typing import Optional, Dict, Any
 from sqlalchemy import or_, and_, exists, func, text
 from app import db
@@ -162,7 +163,7 @@ class AnimalService:
             raise PermissionDeniedError('沒有權限刪除此動物資料')
         
         # 軟刪除
-        animal.deleted_at = datetime.utcnow()
+        animal.deleted_at = get_naive_taipei_now()
         db.session.commit()
     
     @staticmethod
@@ -319,7 +320,7 @@ class AnimalService:
         # 更新狀態和拒絕資訊
         animal.status = AnimalStatus.DRAFT
         animal.rejection_reason = rejection_reason
-        animal.rejected_at = datetime.utcnow()
+        animal.rejected_at = get_naive_taipei_now()
         animal.rejected_by = admin.user_id
         
         db.session.commit()

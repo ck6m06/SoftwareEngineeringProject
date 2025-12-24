@@ -4,6 +4,7 @@ Notification Service
 """
 from datetime import datetime
 from app import db
+from app.utils.datetime_helper import get_naive_taipei_now
 from app.models.others import Notification
 
 
@@ -39,7 +40,7 @@ class NotificationService:
                 type=type,
                 payload=payload or {},
                 read=False,
-                created_at=datetime.utcnow()
+                created_at=get_naive_taipei_now()
             )
             db.session.add(notification)
             
@@ -318,7 +319,7 @@ class NotificationService:
         
         if not notification.read:
             notification.read = True
-            notification.read_at = datetime.utcnow()
+            notification.read_at = get_naive_taipei_now()
             db.session.commit()
         
         return notification
@@ -339,7 +340,7 @@ class NotificationService:
             read=False
         ).update({
             'read': True,
-            'read_at': datetime.utcnow()
+            'read_at': get_naive_taipei_now()
         })
         
         db.session.commit()

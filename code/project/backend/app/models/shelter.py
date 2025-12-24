@@ -3,6 +3,8 @@ Database Models - Shelter
 """
 from datetime import datetime
 from app import db
+from app.utils.datetime_helper import to_taipei_isoformat
+from app.utils.datetime_helper import get_naive_taipei_now
 
 
 class Shelter(db.Model):
@@ -18,8 +20,8 @@ class Shelter(db.Model):
     region = db.Column(db.String(100), nullable=True)
     verified = db.Column(db.Boolean, default=False, nullable=False)
     primary_account_user_id = db.Column(db.BigInteger, db.ForeignKey('users.user_id'), nullable=True)
-    created_at = db.Column(db.DateTime(6), default=datetime.utcnow, nullable=False)
-    updated_at = db.Column(db.DateTime(6), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime(6), default=get_naive_taipei_now, nullable=False)
+    updated_at = db.Column(db.DateTime(6), default=get_naive_taipei_now, onupdate=get_naive_taipei_now, nullable=False)
     deleted_at = db.Column(db.DateTime(6), nullable=True)
     
     # Relationships
@@ -42,6 +44,6 @@ class Shelter(db.Model):
             'region': self.region,
             'verified': self.verified,
             'primary_account_user_id': self.primary_account_user_id,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'created_at': to_taipei_isoformat(self.created_at),
+            'updated_at': to_taipei_isoformat(self.updated_at),
         }

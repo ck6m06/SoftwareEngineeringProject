@@ -3,6 +3,7 @@ Admin Service - 管理員業務邏輯服務
 集中管理系統統計、用戶管理、封禁等管理功能
 """
 from datetime import datetime, timedelta
+from app.utils.datetime_helper import get_naive_taipei_now
 from typing import Dict, Any, Optional, List
 from app import db
 from app.models.user import User, UserRole
@@ -131,7 +132,7 @@ class AdminService:
         if user.role == UserRole.ADMIN:
             raise PermissionDeniedError('不能封禁管理員')
         
-        user.locked_until = datetime.utcnow() + timedelta(days=days)
+        user.locked_until = get_naive_taipei_now() + timedelta(days=days)
         db.session.commit()
         
         # 記錄審計日誌
@@ -341,7 +342,7 @@ class AdminService:
         reviewers = User.query.filter(
             User.role.in_([UserRole.ADMIN, UserRole.SHELTER_MEMBER]),
             User.deleted_at == None,
-            db.or_(User.locked_until == None, User.locked_until < datetime.utcnow())
+            db.or_(User.locked_until == None, User.locked_until < get_naive_taipei_now())
         ).order_by(User.role.desc(), User.username).all()
         
         return [

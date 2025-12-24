@@ -3,6 +3,7 @@ Audit Service - 審計日誌服務
 用於記錄系統中的重要操作
 """
 from datetime import datetime
+from app.utils.datetime_helper import get_naive_taipei_now
 from app import db
 from app.models.others import AuditLog
 import logging
@@ -49,7 +50,7 @@ class AuditService:
                 before_state=before_state,
                 after_state=after_state,
                 shelter_id=shelter_id,
-                timestamp=datetime.utcnow()
+                timestamp=get_naive_taipei_now()
             )
             
             db.session.add(audit_log)

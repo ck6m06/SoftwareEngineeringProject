@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List, Tuple
 from werkzeug.datastructures import FileStorage
 from app import db
+from app.utils.datetime_helper import get_naive_taipei_now
 from app.models.shelter import Shelter
 from app.models.user import User, UserRole
 from app.models.animal import Animal, AnimalStatus, Species, Sex, AnimalImage
@@ -203,7 +204,7 @@ class ShelterService:
         if region is not None:
             shelter.region = region
         
-        shelter.updated_at = datetime.utcnow()
+        shelter.updated_at = get_naive_taipei_now()
         db.session.commit()
         
         return shelter
@@ -234,7 +235,7 @@ class ShelterService:
             raise NotFoundError('收容所不存在')
         
         shelter.verified = verified
-        shelter.updated_at = datetime.utcnow()
+        shelter.updated_at = get_naive_taipei_now()
         db.session.commit()
         
         # 記錄審計日誌
@@ -473,7 +474,7 @@ class ShelterService:
                 if action == 'draft':
                     if animal.status in [AnimalStatus.SUBMITTED, AnimalStatus.PUBLISHED, AnimalStatus.RETIRED]:
                         animal.status = AnimalStatus.DRAFT
-                        animal.updated_at = datetime.utcnow()
+                        animal.updated_at = get_naive_taipei_now()
                         success_count += 1
                     else:
                         errors.append(f'動物 {animal.animal_id} ({animal.name}) 目前狀態無法變更為草稿')
@@ -482,7 +483,7 @@ class ShelterService:
                 elif action == 'submit':
                     if animal.status == AnimalStatus.DRAFT:
                         animal.status = AnimalStatus.SUBMITTED
-                        animal.updated_at = datetime.utcnow()
+                        animal.updated_at = get_naive_taipei_now()
                         success_count += 1
                     else:
                         errors.append(f'動物 {animal.animal_id} ({animal.name}) 必須是草稿狀態才能提交')
@@ -491,7 +492,7 @@ class ShelterService:
                 elif action == 'publish':
                     if animal.status in [AnimalStatus.SUBMITTED, AnimalStatus.DRAFT]:
                         animal.status = AnimalStatus.PUBLISHED
-                        animal.updated_at = datetime.utcnow()
+                        animal.updated_at = get_naive_taipei_now()
                         success_count += 1
                     else:
                         errors.append(f'動物 {animal.animal_id} ({animal.name}) 目前狀態無法發布')
@@ -500,7 +501,7 @@ class ShelterService:
                 elif action == 'retire':
                     if animal.status == AnimalStatus.PUBLISHED:
                         animal.status = AnimalStatus.RETIRED
-                        animal.updated_at = datetime.utcnow()
+                        animal.updated_at = get_naive_taipei_now()
                         success_count += 1
                     else:
                         errors.append(f'動物 {animal.animal_id} ({animal.name}) 必須是已發布狀態才能下架')

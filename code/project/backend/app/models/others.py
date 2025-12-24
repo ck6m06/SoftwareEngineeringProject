@@ -4,6 +4,8 @@ Database Models - Notification, Job, Attachment, AuditLog
 from datetime import datetime
 from app import db
 from enum import Enum
+from app.utils.datetime_helper import to_taipei_isoformat
+from app.utils.datetime_helper import get_naive_taipei_now
 
 
 class Notification(db.Model):
@@ -16,7 +18,7 @@ class Notification(db.Model):
     type = db.Column(db.String(128), nullable=False)
     payload = db.Column(db.JSON, nullable=True)
     read = db.Column(db.Boolean, default=False, nullable=False)
-    created_at = db.Column(db.DateTime(6), default=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime(6), default=get_naive_taipei_now, nullable=False)
     read_at = db.Column(db.DateTime(6), nullable=True)
     
     # Relationships
@@ -35,8 +37,8 @@ class Notification(db.Model):
             'type': self.type,
             'payload': self.payload,
             'read': self.read,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'read_at': self.read_at.isoformat() if self.read_at else None,
+            'created_at': to_taipei_isoformat(self.created_at),
+            'read_at': to_taipei_isoformat(self.read_at),
         }
 
 
@@ -66,7 +68,7 @@ class Job(db.Model):
     payload = db.Column(db.JSON, nullable=True)
     result_summary = db.Column(db.JSON, nullable=True)
     created_by = db.Column(db.BigInteger, db.ForeignKey('users.user_id'), nullable=True)
-    created_at = db.Column(db.DateTime(6), default=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime(6), default=get_naive_taipei_now, nullable=False)
     started_at = db.Column(db.DateTime(6), nullable=True)
     finished_at = db.Column(db.DateTime(6), nullable=True)
     attempts = db.Column(db.Integer, default=0, nullable=False)
@@ -90,9 +92,9 @@ class Job(db.Model):
             'type': self.type,
             'status': self.status.value if self.status else None,
             'created_by': self.created_by,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'started_at': self.started_at.isoformat() if self.started_at else None,
-            'finished_at': self.finished_at.isoformat() if self.finished_at else None,
+            'created_at': to_taipei_isoformat(self.created_at),
+            'started_at': to_taipei_isoformat(self.started_at),
+            'finished_at': to_taipei_isoformat(self.finished_at),
             'attempts': self.attempts,
         }
         
@@ -119,7 +121,7 @@ class Attachment(db.Model):
     size = db.Column(db.Integer, nullable=True)
     meta_data = db.Column(db.JSON, nullable=True)  # 添加 meta_data 欄位用於額外資訊
     created_by = db.Column(db.BigInteger, db.ForeignKey('users.user_id'), nullable=True)
-    created_at = db.Column(db.DateTime(6), default=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime(6), default=get_naive_taipei_now, nullable=False)
     deleted_at = db.Column(db.DateTime(6), nullable=True)
     
     # Relationships
@@ -141,7 +143,7 @@ class Attachment(db.Model):
             'size': self.size,
             'meta_data': self.meta_data,
             'created_by': self.created_by,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'created_at': to_taipei_isoformat(self.created_at),
         }
 
 
@@ -157,7 +159,7 @@ class AuditLog(db.Model):
     shelter_id = db.Column(db.BigInteger, db.ForeignKey('shelters.shelter_id'), nullable=True)
     before_state = db.Column(db.JSON, nullable=True)
     after_state = db.Column(db.JSON, nullable=True)
-    timestamp = db.Column(db.DateTime(6), default=datetime.utcnow, nullable=False)
+    timestamp = db.Column(db.DateTime(6), default=get_naive_taipei_now, nullable=False)
     
     # Relationships
     actor = db.relationship('User', back_populates='audit_logs')
@@ -177,5 +179,5 @@ class AuditLog(db.Model):
             'shelter_id': self.shelter_id,
             'before_state': self.before_state,
             'after_state': self.after_state,
-            'timestamp': self.timestamp.isoformat() if self.timestamp else None,
+            'timestamp': to_taipei_isoformat(self.timestamp),
         }

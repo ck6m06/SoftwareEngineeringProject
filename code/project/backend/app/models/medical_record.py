@@ -4,6 +4,7 @@ Database Models - Medical Record
 from datetime import datetime
 from app import db
 from enum import Enum
+from app.utils.datetime_helper import to_taipei_isoformat, get_naive_taipei_now
 
 
 class RecordType(str, Enum):
@@ -29,8 +30,8 @@ class MedicalRecord(db.Model):
     verified = db.Column(db.Boolean, default=False, nullable=False)
     verified_by = db.Column(db.BigInteger, db.ForeignKey('users.user_id'), nullable=True)
     created_by = db.Column(db.BigInteger, db.ForeignKey('users.user_id'), nullable=True)
-    created_at = db.Column(db.DateTime(6), default=datetime.utcnow, nullable=False)
-    updated_at = db.Column(db.DateTime(6), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime(6), default=get_naive_taipei_now, nullable=False)
+    updated_at = db.Column(db.DateTime(6), default=get_naive_taipei_now, onupdate=get_naive_taipei_now, nullable=False)
     deleted_at = db.Column(db.DateTime(6), nullable=True)
     
     # Relationships
@@ -65,8 +66,8 @@ class MedicalRecord(db.Model):
             'verified': self.verified,
             'verified_by': self.verified_by,
             'created_by': self.created_by,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'created_at': to_taipei_isoformat(self.created_at),
+            'updated_at': to_taipei_isoformat(self.updated_at),
         }
         
         # 始終包含醫療證明附件信息
@@ -84,7 +85,7 @@ class MedicalRecord(db.Model):
                     'size': attachment.size,
                     'storage_key': attachment.storage_key,
                     'meta_data': attachment.meta_data,
-                    'created_at': attachment.created_at.isoformat() if attachment.created_at else None
+                    'created_at': to_taipei_isoformat(attachment.created_at)
                 }
                 proof_attachments_data.append(attachment_dict)
             

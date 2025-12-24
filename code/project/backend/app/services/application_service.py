@@ -3,6 +3,7 @@ Application Service - 申請業務邏輯服務
 集中管理所有申請相關的業務邏輯
 """
 from datetime import datetime
+from app.utils.datetime_helper import get_naive_taipei_now
 from typing import Dict, Any, Optional, List
 from sqlalchemy import or_
 from app import db
@@ -245,7 +246,7 @@ class ApplicationService:
             applicant_id=applicant.user_id,
             type=data.get('type', 'ADOPTION'),
             status=ApplicationStatus.PENDING,
-            submitted_at=datetime.utcnow(),
+            submitted_at=get_naive_taipei_now(),
             attachments=data.get('attachments'),
             idempotency_key=idempotency_key,
             # 申請人詳細資料
@@ -347,12 +348,12 @@ class ApplicationService:
             animal = application.animal
             if animal:
                 animal.status = AnimalStatus.ADOPTED
-                animal.updated_at = datetime.utcnow()
+                animal.updated_at = get_naive_taipei_now()
         else:
             application.status = ApplicationStatus.REJECTED
         
         application.assignee_id = reviewer.user_id
-        application.reviewed_at = datetime.utcnow()
+        application.reviewed_at = get_naive_taipei_now()
         application.review_notes = review_notes
         application.version += 1
         

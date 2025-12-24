@@ -3,6 +3,7 @@ Attachment Service - 附件業務邏輯服務
 集中管理附件的驗證、創建和權限檢查
 """
 from datetime import datetime
+from app.utils.datetime_helper import get_naive_taipei_now
 from typing import Dict, Any, Optional
 from app import db
 from app.models.others import Attachment
@@ -130,7 +131,7 @@ class AttachmentService:
             raise PermissionDeniedError('無權限刪除此附件')
         
         # 軟刪除
-        attachment.deleted_at = datetime.utcnow()
+        attachment.deleted_at = get_naive_taipei_now()
         db.session.commit()
     
     @staticmethod

@@ -3,6 +3,7 @@ Medical Record Service - 醫療紀錄業務邏輯服務
 集中管理醫療紀錄的 CRUD、權限檢查和附件處理
 """
 from datetime import datetime, timedelta
+from app.utils.datetime_helper import get_naive_taipei_now
 from typing import List, Optional, Dict, Any
 from sqlalchemy import or_, and_, func
 from app import db
@@ -265,7 +266,7 @@ class MedicalRecordService:
         
         # 創建者可在 24 小時內更新
         if record.created_by == current_user_id:
-            if record.created_at and datetime.utcnow() - record.created_at <= timedelta(hours=24):
+            if record.created_at and get_naive_taipei_now() - record.created_at <= timedelta(hours=24):
                 has_permission = True
             else:
                 raise PermissionDeniedError('只能在創建後 24 小時內更新醫療記錄')
@@ -321,7 +322,7 @@ class MedicalRecordService:
             # 更新 JSON 欄位（向後兼容）
             record.attachments = attachments_data
         
-        record.updated_at = datetime.utcnow()
+        record.updated_at = get_naive_taipei_now()
         db.session.commit()
         return record
     
@@ -356,7 +357,7 @@ class MedicalRecordService:
         
         record.verified = verified
         record.verified_by = current_user_id if verified else None
-        record.updated_at = datetime.utcnow()
+        record.updated_at = get_naive_taipei_now()
         db.session.commit()
         
         return record

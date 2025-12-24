@@ -4,6 +4,7 @@ Model: PendingRegistration
 """
 from datetime import datetime
 from app import db
+from app.utils.datetime_helper import to_taipei_isoformat, get_naive_taipei_now
 
 
 class PendingRegistration(db.Model):
@@ -23,8 +24,8 @@ class PendingRegistration(db.Model):
     resend_count = db.Column(db.Integer, default=0, nullable=False)
     client_ip = db.Column(db.String(45), nullable=True)
     user_agent = db.Column(db.String(1024), nullable=True)
-    created_at = db.Column(db.DateTime(6), default=datetime.utcnow, nullable=False)
-    updated_at = db.Column(db.DateTime(6), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime(6), default=get_naive_taipei_now, nullable=False)
+    updated_at = db.Column(db.DateTime(6), default=get_naive_taipei_now, onupdate=get_naive_taipei_now, nullable=False)
 
     def to_dict(self):
         return {
@@ -34,8 +35,8 @@ class PendingRegistration(db.Model):
             'phone_number': self.phone_number,
             'region': self.region,
             'address': self.address,
-            'code_expires_at': self.code_expires_at.isoformat() if self.code_expires_at else None,
+            'code_expires_at': to_taipei_isoformat(self.code_expires_at),
             'attempts': self.attempts,
             'resend_count': self.resend_count,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'created_at': to_taipei_isoformat(self.created_at),
         }

@@ -4,6 +4,8 @@ Database Models - Application
 from datetime import datetime
 from app import db
 from enum import Enum
+from app.utils.datetime_helper import to_taipei_isoformat
+from app.utils.datetime_helper import get_naive_taipei_now
 
 
 class ApplicationType(str, Enum):
@@ -47,8 +49,8 @@ class Application(db.Model):
     reason = db.Column(db.Text, nullable=True)  # 領養原因
     notes = db.Column(db.Text, nullable=True)  # 其他備註
     
-    created_at = db.Column(db.DateTime(6), default=datetime.utcnow, nullable=False)
-    updated_at = db.Column(db.DateTime(6), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime(6), default=get_naive_taipei_now, nullable=False)
+    updated_at = db.Column(db.DateTime(6), default=get_naive_taipei_now, onupdate=get_naive_taipei_now, nullable=False)
     deleted_at = db.Column(db.DateTime(6), nullable=True)
     
     # Relationships
@@ -67,8 +69,8 @@ class Application(db.Model):
             'animal_id': self.animal_id,
             'type': self.type.value if self.type else None,
             'status': self.status.value if self.status else None,
-            'submitted_at': self.submitted_at.isoformat() if self.submitted_at else None,
-            'reviewed_at': self.reviewed_at.isoformat() if self.reviewed_at else None,
+            'submitted_at': to_taipei_isoformat(self.submitted_at),
+            'reviewed_at': to_taipei_isoformat(self.reviewed_at),
             'review_notes': self.review_notes,
             'assignee_id': self.assignee_id,
             'version': self.version,
@@ -81,8 +83,8 @@ class Application(db.Model):
             'has_experience': self.has_experience,
             'reason': self.reason,
             'notes': self.notes,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'created_at': to_taipei_isoformat(self.created_at),
+            'updated_at': to_taipei_isoformat(self.updated_at),
         }
         
         if include_relations:

@@ -3,6 +3,7 @@ Auth Service - 身份驗證業務邏輯服務
 集中管理所有認證相關的業務邏輯
 """
 from datetime import datetime, timedelta
+from app.utils.datetime_helper import get_naive_taipei_now
 from typing import Optional, Dict, Any, Tuple
 from app import db
 from app.models.user import User, UserRole
@@ -60,7 +61,7 @@ class AuthService:
         pwd_hash = hash_password(password)
         code = generate_numeric_code(6)
         code_hash = hash_verification_code(code)
-        expires = datetime.utcnow() + timedelta(minutes=15)
+        expires = get_naive_taipei_now() + timedelta(minutes=15)
         
         # 創建待註冊記錄
         pending = PendingRegistration(
@@ -112,7 +113,7 @@ class AuthService:
             raise NotFoundError('找不到對應的驗證流程')
         
         # 檢查過期
-        if pending.code_expires_at < datetime.utcnow():
+        if pending.code_expires_at < get_naive_taipei_now():
             db.session.delete(pending)
             db.session.commit()
             raise ValidationError('驗證碼已過期，請重新註冊或重新發送')
@@ -192,7 +193,7 @@ class AuthService:
         # 生成新驗證碼
         code = generate_numeric_code(6)
         pending.verification_code_hash = hash_verification_code(code)
-        pending.code_expires_at = datetime.utcnow() + timedelta(minutes=15)
+        pending.code_expires_at = get_naive_taipei_now() + timedelta(minutes=15)
         pending.resend_count = (pending.resend_count or 0) + 1
         
         db.session.commit()
@@ -243,7 +244,7 @@ class AuthService:
             
             # 如果失敗次數超過 5 次，鎖定帳號 30 分鐘
             if user.failed_login_attempts >= 5:
-                user.locked_until = datetime.utcnow() + timedelta(minutes=30)
+                user.locked_until = get_naive_taipei_now() + timedelta(minutes=30)
             
             db.session.commit()
             raise UnauthorizedError('Email 或密碼錯誤')
@@ -251,7 +252,7 @@ class AuthService:
         # 登入成功，重置失敗次數
         user.failed_login_attempts = 0
         user.locked_until = None
-        user.last_login_at = datetime.utcnow()
+        user.last_login_at = get_naive_taipei_now()
         db.session.commit()
         
         # 創建 token
@@ -394,7 +395,7 @@ class AuthService:
         # 更新密碼
         old_password_hash = user.password_hash
         user.password_hash = hash_password(new_password)
-        user.password_changed_at = datetime.utcnow()
+        user.password_changed_at = get_naive_taipei_now()
         
         # 重置失敗登入次數
         user.failed_login_attempts = 0

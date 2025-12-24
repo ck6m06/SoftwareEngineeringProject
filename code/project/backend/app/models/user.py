@@ -4,6 +4,8 @@ Database Models - User
 from datetime import datetime
 from app import db
 from enum import Enum
+from app.utils.datetime_helper import to_taipei_isoformat
+from app.utils.datetime_helper import get_naive_taipei_now
 
 
 class UserRole(str, Enum):
@@ -36,8 +38,8 @@ class User(db.Model):
     last_login_at = db.Column(db.DateTime(6), nullable=True)
     failed_login_attempts = db.Column(db.Integer, default=0, nullable=False)
     locked_until = db.Column(db.DateTime(6), nullable=True)
-    created_at = db.Column(db.DateTime(6), default=datetime.utcnow, nullable=False)
-    updated_at = db.Column(db.DateTime(6), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime(6), default=get_naive_taipei_now, nullable=False)
+    updated_at = db.Column(db.DateTime(6), default=get_naive_taipei_now, onupdate=get_naive_taipei_now, nullable=False)
     deleted_at = db.Column(db.DateTime(6), nullable=True)
     
     # Relationships
@@ -70,7 +72,8 @@ class User(db.Model):
     @property
     def is_locked(self):
         """檢查帳號是否被鎖定"""
-        if self.locked_until and self.locked_until > datetime.utcnow():
+        from app.utils.datetime_helper import get_naive_taipei_now
+        if self.locked_until and self.locked_until > get_naive_taipei_now():
             return True
         return False
     
@@ -89,14 +92,14 @@ class User(db.Model):
             'verified': self.verified,
             'primary_shelter_id': self.primary_shelter_id,
             'profile_photo_url': self.profile_photo_url,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'created_at': to_taipei_isoformat(self.created_at),
+            'updated_at': to_taipei_isoformat(self.updated_at),
         }
         
         if include_sensitive:
             data.update({
                 'settings': self.settings,
-                'last_login_at': self.last_login_at.isoformat() if self.last_login_at else None,
+                'last_login_at': to_taipei_isoformat(self.last_login_at),
                 'failed_login_attempts': self.failed_login_attempts,
             })
         

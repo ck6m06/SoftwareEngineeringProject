@@ -72,6 +72,7 @@ services:
     container_name: pet-adoption-backend
     restart: unless-stopped
     environment:
+      TZ: Asia/Taipei
       FLASK_ENV: ${FLASK_ENV:-production}
       DATABASE_URL: mysql+pymysql://${MYSQL_USER:-petuser}:${MYSQL_PASSWORD:-petpassword}@mysql:3306/${MYSQL_DATABASE:-pet_adoption}
       REDIS_HOST: redis
@@ -117,6 +118,7 @@ services:
     restart: unless-stopped
     command: celery -A app.celery worker --loglevel=info
     environment:
+      TZ: Asia/Taipei
       FLASK_ENV: ${FLASK_ENV:-production}
       DATABASE_URL: mysql+pymysql://${MYSQL_USER:-petuser}:${MYSQL_PASSWORD:-petpassword}@mysql:3306/${MYSQL_DATABASE:-pet_adoption}
       REDIS_HOST: redis

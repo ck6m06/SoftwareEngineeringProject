@@ -8,6 +8,7 @@ from typing import Dict, Any
 
 from app.celery import celery
 from app import db
+from app.utils.datetime_helper import get_naive_taipei_now
 from app.models import Job, JobStatus, Animal, AnimalStatus, Shelter, MedicalRecord, RecordType, AnimalImage
 
 
@@ -33,7 +34,7 @@ def process_animal_batch_import(self, job_id: int) -> Dict[str, Any]:
     
     # 更新狀態為執行中
     job.status = JobStatus.RUNNING
-    job.started_at = datetime.utcnow()
+    job.started_at = get_naive_taipei_now()
     db.session.commit()
     
     try:
@@ -152,7 +153,7 @@ def process_animal_batch_import(self, job_id: int) -> Dict[str, Any]:
             # 如果有照片格式錯誤，直接失敗
             if photo_validation_errors:
                 job.status = JobStatus.FAILED
-                job.completed_at = datetime.utcnow()
+                job.completed_at = get_naive_taipei_now()
                 job.result_summary = {
                     'overall_result': 'failed',
                     'result_message': f'照片格式驗證失敗：{len(photo_validation_errors)} 個錯誤，匯入已取消',
@@ -239,8 +240,8 @@ def process_animal_batch_import(self, job_id: int) -> Dict[str, Any]:
                     status=AnimalStatus.DRAFT,
                     owner_id=None,  # 收容所動物不設定 owner_id
                     created_by=job.created_by,
-                    created_at=datetime.utcnow(),
-                    updated_at=datetime.utcnow()
+                    created_at=get_naive_taipei_now(),
+                    updated_at=get_naive_taipei_now()
                 )
                 
                 # 添加並 flush 以獲取 animal_id
@@ -340,8 +341,8 @@ def process_animal_batch_import(self, job_id: int) -> Dict[str, Any]:
                         details=row.get('details', '').strip() or None,
                         verified=False,
                         created_by=job.created_by,
-                        created_at=datetime.utcnow(),
-                        updated_at=datetime.utcnow()
+                        created_at=get_naive_taipei_now(),
+                        updated_at=get_naive_taipei_now()
                     )
                     
                     db.session.add(medical_record)
@@ -528,7 +529,7 @@ def process_animal_batch_import(self, job_id: int) -> Dict[str, Any]:
             overall_result = 'success'
             result_message = '匯入完全成功'
         
-        job.completed_at = datetime.utcnow()
+        job.completed_at = get_naive_taipei_now()
         job.result_summary = {
             'overall_result': overall_result,
             'result_message': result_message,
@@ -565,7 +566,7 @@ def process_animal_batch_import(self, job_id: int) -> Dict[str, Any]:
             job = Job.query.get(job_id)  # 重新查詢 job (因為已 rollback)
             if job:
                 job.status = JobStatus.FAILED
-                job.completed_at = datetime.utcnow()
+                job.completed_at = get_naive_taipei_now()
                 job.result_summary = {
                     'error': str(exc),
                     'error_type': type(exc).__name__,
@@ -599,7 +600,7 @@ def process_animal_batch_export(self, job_id: int) -> Dict[str, Any]:
         return {'error': 'Job not found'}
     
     job.status = JobStatus.RUNNING
-    job.started_at = datetime.utcnow()
+    job.started_at = get_naive_taipei_now()
     db.session.commit()
     
     try:
@@ -662,7 +663,7 @@ def process_animal_batch_export(self, job_id: int) -> Dict[str, Any]:
         
         # 更新 job 狀態
         job.status = JobStatus.SUCCEEDED
-        job.completed_at = datetime.utcnow()
+        job.completed_at = get_naive_taipei_now()
         job.result_summary = {
             'total_count': len(animals),
             'file_url': file_url,
@@ -678,7 +679,7 @@ def process_animal_batch_export(self, job_id: int) -> Dict[str, Any]:
         
     except Exception as exc:
         job.status = JobStatus.FAILED
-        job.completed_at = datetime.utcnow()
+        job.completed_at = get_naive_taipei_now()
         job.result_summary = {
             'error': str(exc),
             'error_type': type(exc).__name__

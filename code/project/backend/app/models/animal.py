@@ -2,6 +2,7 @@
 Database Models - Animal
 """
 from datetime import datetime
+from app.utils.datetime_helper import get_naive_taipei_now, to_taipei_isoformat
 from app import db
 from enum import Enum
 
@@ -51,8 +52,8 @@ class Animal(db.Model):
     rejected_by = db.Column(db.BigInteger, db.ForeignKey('users.user_id'), nullable=True)
     
     created_by = db.Column(db.BigInteger, db.ForeignKey('users.user_id'), nullable=False)
-    created_at = db.Column(db.DateTime(6), default=datetime.utcnow, nullable=False)
-    updated_at = db.Column(db.DateTime(6), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime(6), default=get_naive_taipei_now, nullable=False)
+    updated_at = db.Column(db.DateTime(6), default=get_naive_taipei_now, onupdate=get_naive_taipei_now, nullable=False)
     deleted_at = db.Column(db.DateTime(6), nullable=True)
     
     # Relationships
@@ -71,7 +72,7 @@ class Animal(db.Model):
     def age(self):
         """計算動物年齡"""
         if self.dob:
-            today = datetime.utcnow().date()
+            today = get_naive_taipei_now().date()
             age_years = today.year - self.dob.year
             if today.month < self.dob.month or (today.month == self.dob.month and today.day < self.dob.day):
                 age_years -= 1
@@ -106,11 +107,11 @@ class Animal(db.Model):
             'owner_id': self.owner_id,
             'medical_summary': self.medical_summary,
             'rejection_reason': self.rejection_reason,
-            'rejected_at': self.rejected_at.isoformat() if self.rejected_at else None,
+            'rejected_at': to_taipei_isoformat(self.rejected_at),
             'rejected_by': self.rejected_by,
             'created_by': self.created_by,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'created_at': to_taipei_isoformat(self.created_at),
+            'updated_at': to_taipei_isoformat(self.updated_at),
             'has_pending_application': self.has_pending_application(),
             # 總是包含 images，確保前端有正確的圖片數組
             'images': [img.to_dict() for img in self.images] if hasattr(self, 'images') else []
@@ -136,7 +137,7 @@ class AnimalImage(db.Model):
     width = db.Column(db.Integer, nullable=True)
     height = db.Column(db.Integer, nullable=True)
     order = db.Column(db.Integer, default=0, nullable=False)
-    created_at = db.Column(db.DateTime(6), default=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime(6), default=get_naive_taipei_now, nullable=False)
     
     # Relationships
     animal = db.relationship('Animal', back_populates='images')
@@ -173,5 +174,5 @@ class AnimalImage(db.Model):
             'width': self.width,
             'height': self.height,
             'order': self.order,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'created_at': to_taipei_isoformat(self.created_at),
         }

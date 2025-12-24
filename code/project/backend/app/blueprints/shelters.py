@@ -5,6 +5,7 @@ from flask import jsonify, request
 from flask_smorest import Blueprint, abort
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from datetime import datetime
+from app.utils.datetime_helper import get_naive_taipei_now
 import uuid
 
 from app import db
@@ -386,7 +387,7 @@ def get_shelter_animals(shelter_id):
             ))
         
         if min_age is not None or max_age is not None:
-            today = datetime.utcnow().date()
+            today = get_naive_taipei_now().date()
             if min_age is not None:
                 cutoff_max = today.replace(year=today.year - min_age)
                 query = query.filter(Animal.dob != None, Animal.dob <= cutoff_max)

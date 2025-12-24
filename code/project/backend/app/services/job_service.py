@@ -3,6 +3,7 @@ Job Service - 背景任務業務邏輯服務
 集中管理所有任務相關的業務邏輯
 """
 from datetime import datetime
+from app.utils.datetime_helper import get_naive_taipei_now
 from typing import Optional, Dict, Any
 from sqlalchemy.orm import defer
 from app import db
@@ -182,7 +183,7 @@ class JobService:
         
         # 更新任務狀態
         job.status = JobStatus.FAILED
-        job.finished_at = datetime.utcnow()
+        job.finished_at = get_naive_taipei_now()
         job.result_summary = {'error': '任務已被用戶取消'}
         db.session.commit()
         
@@ -233,7 +234,7 @@ class JobService:
                 target_user = db.session.get(User, user_id)
                 if target_user:
                     # 軟刪除用戶
-                    target_user.deleted_at = datetime.utcnow()
+                    target_user.deleted_at = get_naive_taipei_now()
                     
                     # 記錄審計日誌
                     from app.services.audit_service import audit_service
@@ -247,10 +248,10 @@ class JobService:
         
         # 更新任務狀態
         job.status = JobStatus.SUCCEEDED
-        job.finished_at = datetime.utcnow()
+        job.finished_at = get_naive_taipei_now()
         job.result_summary = {
             'approved_by': admin_id,
-            'approved_at': datetime.utcnow().isoformat(),
+            'approved_at': get_naive_taipei_now().isoformat(),
             'notes': notes
         }
         
@@ -300,10 +301,10 @@ class JobService:
         
         # 更新任務狀態
         job.status = JobStatus.FAILED
-        job.finished_at = datetime.utcnow()
+        job.finished_at = get_naive_taipei_now()
         job.result_summary = {
             'rejected_by': admin_id,
-            'rejected_at': datetime.utcnow().isoformat(),
+            'rejected_at': get_naive_taipei_now().isoformat(),
             'reason': reason
         }
         
