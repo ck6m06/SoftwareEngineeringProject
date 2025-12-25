@@ -362,10 +362,58 @@ docker compose logs -f celery-worker
 
 ### 測試
 
-**後端測試**:
+#### 後端單元測試
+
+**執行所有單元測試**:
 ```bash
 cd code/project/backend
-pytest tests/
+
+# 設定 PYTHONPATH（自動使用當前目錄）
+# Windows PowerShell
+$env:PYTHONPATH = $PWD
+
+# Linux / macOS
+export PYTHONPATH=$(pwd)
+
+# 或使用絕對路徑（根據你的專案位置調整）
+# Windows: $env:PYTHONPATH = "你的專案路徑\code\project\backend"
+# Linux/macOS: export PYTHONPATH="/你的專案路徑/code/project/backend"
+
+# 執行所有測試
+pytest tests/unit -v
+
+# 簡化輸出
+pytest tests/unit -q
+
+# 生成覆蓋率報告
+pytest tests/unit --cov=app/services --cov-report=term --cov-report=html
+
+# 查看特定服務的覆蓋率
+pytest tests/unit --cov=app/services/auth_service --cov=app/services/permission_service --cov-report=term-missing
+```
+
+**測試結果**:
+- 總測試數: **353 passed** ✅
+- 服務層覆蓋率: **94%** (1641 statements, 91 missed)
+- 100% 覆蓋: attachment_service, audit_service
+- 95%+ 覆蓋: auth_service (95%), permission_service (97%)
+
+**查看覆蓋率報告**:
+```bash
+# HTML 報告會生成在 htmlcov/ 目錄
+# 開啟 htmlcov/index.html 查看詳細報告
+```
+
+**使用 Docker 執行測試**:
+```bash
+# 在專案根目錄
+cd code/project
+
+# 執行所有測試
+docker compose exec backend pytest tests/unit -v
+
+# 生成覆蓋率報告
+docker compose exec backend pytest tests/unit --cov=app/services --cov-report=term
 ```
 
 **前端測試**:
