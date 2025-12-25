@@ -1,7 +1,7 @@
 @startuml 使用案例6_2: 通知管理
 title 使用案例6.2: 通知管理流程
 
-actor 使用者 as User
+actor "所有使用者" as User
 participant "NotificationCenter.vue" as Center
 participant "useNotifications.ts" as Composable
 participant "client.ts\" as API

@@ -1,7 +1,7 @@
 ﻿@startuml 使用案例3_2: 申請審核作業
 title 使用案例3.2: 申請審核作業
 
-actor "送養者" as User
+actor "送養者\n( 一般會員或收容所會員 )" as User
 participant "ApplicationReview.vue" as ApplicationReviewPage
 participant "applications.ts" as ApplicationAPI
 participant "applications.py(blueprint)" as ApplicationBlueprint

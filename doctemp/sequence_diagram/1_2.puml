@@ -1,5 +1,5 @@
 ﻿@startuml 使用案例1_2_動物搜尋篩選
-title 使用案例1.2: 動物搜尋篩選流程
+title 使用案例1.2: 動物搜尋篩選
 
 actor "所有使用者" as User
 participant "Animals.vue" as AnimalsPage

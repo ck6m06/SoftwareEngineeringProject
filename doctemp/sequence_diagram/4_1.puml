@@ -1,7 +1,7 @@
 ﻿@startuml 使用案例4_1: 醫療紀錄新增
 title 使用案例4.1: 醫療紀錄新增
 
-actor "動物管理者" as User
+actor "所有使用者" as User
 participant "MedicalRecords.vue" as MedicalRecordsPage
 participant "medicalRecords.ts" as MedicalRecordsAPI
 participant "medical_records.py(blueprint)" as MedicalRecordsBlueprint

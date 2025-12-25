@@ -1,7 +1,7 @@
 @startuml 使用案例6_1: 通知瀏覽
 title 使用案例6.1: 通知瀏覽流程
 
-actor 使用者 as User
+actor "所有使用者" as User
 participant "NotificationBell.vue" as Bell
 participant "NotificationCenter.vue" as Center
 participant "useNotifications.ts" as Composable

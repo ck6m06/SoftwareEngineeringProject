@@ -1,5 +1,5 @@
 ﻿@startuml 使用案例2_3_收容所送養發佈
-title 使用案例2.3: 收容所送養發佈流程
+title 使用案例2.3: 收容所送養發佈
 
 actor "收容所會員" as User
 participant "RehomeForm.vue" as RehomeFormPage

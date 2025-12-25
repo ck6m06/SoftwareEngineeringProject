@@ -1,7 +1,7 @@
 @startuml 使用案例3_1: 申請列表瀏覽
 title 使用案例3.1: 申請列表瀏覽
 
-actor "審核者" as User
+actor "所有使用者" as User
 participant "ApplicationReview.vue" as ApplicationReviewPage
 participant "applications.ts" as ApplicationAPI
 participant "applications.py(blueprint)" as ApplicationBlueprint

@@ -1,5 +1,5 @@
 @startuml 使用案例2_1_個人送養發佈
-title 使用案例2.1: 個人送養發佈流程
+title 使用案例2.1: 個人送養發佈
 
 actor "一般會員" as User
 participant "RehomeForm.vue" as Form

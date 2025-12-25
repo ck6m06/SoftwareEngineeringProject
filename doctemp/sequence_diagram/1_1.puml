@@ -1,5 +1,5 @@
 ﻿@startuml 使用案例1_1_動物列表瀏覽
-title 使用案例1.1: 動物列表瀏覽流程
+title 使用案例1.1: 動物列表瀏覽
 
 actor "所有使用者" as User
 participant "Animals.vue" as AnimalsPage

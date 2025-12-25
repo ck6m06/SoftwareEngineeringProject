@@ -1,7 +1,7 @@
 ﻿@startuml 使用案例3_3: 申請審核通知
 title 使用案例3.3: 申請審核通知
 
-actor "申請者" as Applicant
+actor "申請者\n( 一般會員或收容所會員 )" as Applicant
 participant "NotificationCenter.vue" as NotificationPage
 participant "NotificationBell.vue" as NotificationBell
 participant "useNotifications.ts" as NotificationComposable

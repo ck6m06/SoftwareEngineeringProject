@@ -1,5 +1,5 @@
 @startuml 使用案例2_2_個人送養管理
-title 使用案例2.2: 個人送養管理流程
+title 使用案例2.2: 個人送養管理
 
 actor "一般會員" as User
 participant "MyRehomes.vue" as MyRehomesPage

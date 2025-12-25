@@ -1,5 +1,5 @@
 @startuml 使用案例1_4_領養申請提交
-title 使用案例1.4: 領養申請提交流程
+title 使用案例1.4: 領養申請提交
 
 actor "一般會員" as User
 participant "AnimalDetail.vue" as DetailPage

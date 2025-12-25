@@ -1,7 +1,7 @@
 ﻿@startuml 使用案例4_2: 醫療紀錄檢視
 title 使用案例4.2: 醫療紀錄檢視
 
-actor "使用者" as User
+actor "所有使用者" as User
 participant "AnimalDetail.vue" as AnimalDetailPage
 participant "medicalRecords.ts" as MedicalRecordsAPI
 participant "medical_records.py(blueprint)" as MedicalRecordsBlueprint

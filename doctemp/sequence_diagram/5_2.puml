@@ -1,7 +1,7 @@
 @startuml 使用案例5_2: 資料審核
 title 使用案例5.2: 資料審核流程
 
-actor 管理員 as Admin
+actor "管理員" as Admin
 participant "AdminDashboard.vue" as Dashboard
 participant "AuditLogs.vue" as AuditLogs
 participant "animals.ts" as API
