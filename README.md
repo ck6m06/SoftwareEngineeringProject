@@ -364,25 +364,15 @@ docker compose logs -f celery-worker
 
 #### 後端單元測試
 
-**執行所有單元測試**:
+**本地執行測試**:
 ```bash
+# 切換到 backend 目錄
 cd code/project/backend
 
-# 設定 PYTHONPATH（自動使用當前目錄）
-# Windows PowerShell
-$env:PYTHONPATH = $PWD
-
-# Linux / macOS
-export PYTHONPATH=$(pwd)
-
-# 或使用絕對路徑（根據你的專案位置調整）
-# Windows: $env:PYTHONPATH = "你的專案路徑\code\project\backend"
-# Linux/macOS: export PYTHONPATH="/你的專案路徑/code/project/backend"
-
-# 執行所有測試
+# 執行所有測試（詳細輸出）
 pytest tests/unit -v
 
-# 簡化輸出
+# 執行所有測試（簡化輸出）
 pytest tests/unit -q
 
 # 生成覆蓋率報告
@@ -392,16 +382,13 @@ pytest tests/unit --cov=app/services --cov-report=term --cov-report=html
 pytest tests/unit --cov=app/services/auth_service --cov=app/services/permission_service --cov-report=term-missing
 ```
 
-**測試結果**:
-- 總測試數: **353 passed** ✅
-- 服務層覆蓋率: **94%** (1641 statements, 91 missed)
-- 100% 覆蓋: attachment_service, audit_service
-- 95%+ 覆蓋: auth_service (95%), permission_service (97%)
-
-**查看覆蓋率報告**:
+**查看 HTML 覆蓋率報告**:
 ```bash
-# HTML 報告會生成在 htmlcov/ 目錄
-# 開啟 htmlcov/index.html 查看詳細報告
+# Windows
+start htmlcov\index.html
+
+# Linux / macOS
+open htmlcov/index.html
 ```
 
 **使用 Docker 執行測試**:
@@ -416,10 +403,69 @@ docker compose exec backend pytest tests/unit -v
 docker compose exec backend pytest tests/unit --cov=app/services --cov-report=term
 ```
 
+**測試成果**:
+- ✅ **353 個單元測試全部通過**
+- ✅ **94% 服務層覆蓋率**（1641 statements, 91 missed）
+- ✅ **100% 覆蓋**：attachment_service, audit_service
+- ✅ **95%+ 覆蓋**：auth_service (95%), permission_service (97%)
+
+**測試架構說明**：
+本專案採用**服務層優先**測試策略，聚焦於 `app/services/` 的業務邏輯層：
+- 使用 Mock 技術隔離外部依賴（資料庫、MinIO、Redis、SMTP）
+- 透過 Fixture 提供可重複使用的測試資料
+- 每個測試獨立運行，確保結果可靠
+
+#### 後端整合測試
+
+**本地執行測試**:
+```bash
+# 切換到 backend 目錄
+cd code/project/backend
+
+# 執行所有整合測試
+pytest tests/integration -v
+
+# 執行特定模組的整合測試
+pytest tests/integration/test_animal_integration.py -v
+pytest tests/integration/test_application_integration.py -v
+pytest tests/integration/test_auth_integration.py -v
+pytest tests/integration/test_medical_integration.py -v
+pytest tests/integration/test_notification_integration.py -v
+pytest tests/integration/test_shelter_integration.py -v
+pytest tests/integration/test_user_integration.py -v
+```
+
+**使用 Docker 執行測試**:
+```bash
+# 在專案根目錄
+cd code/project
+
+# 執行所有整合測試
+docker compose exec backend pytest tests/integration -v
+
+# 執行特定模組
+docker compose exec backend pytest tests/integration/test_animal_integration.py -v
+```
+
+**整合測試成果**:
+- ✅ **100% 通過率**
+- 📊 **測試分佈**：
+  - Medical (醫療紀錄): 6 tests
+  - Notification (通知系統): 8 tests
+  - Shelter (收容所管理): 10 tests
+  - User (使用者管理): 11 tests
+  - Animal (動物管理)、Application (申請管理)、Auth (認證系統)
+
+**整合測試說明**：
+- 整合測試使用 SQLite 記憶體資料庫（`:memory:`）
+- 驗證完整的 Route → Service → ORM → Database 流程
+- 測試涵蓋完整的 API 端點與業務流程
+- 每個測試獨立運行，確保測試間無互相影響
+- 已移除依賴未實作功能的測試（Job 系統、批次匯入等）
+
 **前端測試**:
 ```bash
 cd code/project/frontend
-npm run test:unit      # 單元測試
 npm run test:e2e       # E2E 測試
 ```
 

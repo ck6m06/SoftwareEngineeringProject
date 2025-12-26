@@ -77,6 +77,53 @@
 **VS Code擴充套件:**
 - PlantUML extension by jebbs
 
+## 測試說明
+
+### 單元測試
+單元測試位於 `code/project/backend/tests/unit/`，主要測試 Service 層的業務邏輯。
+
+```bash
+cd code/project/backend
+
+# 執行所有單元測試
+pytest tests/unit -v
+
+# 查看單元測試覆蓋率
+pytest tests/unit --cov=app.services --cov-report=term
+pytest tests/unit --cov=app.services --cov-report=html
+```
+
+### 整合測試
+整合測試位於 `code/project/backend/tests/integration/`，測試完整的 API 流程（Route → Service → ORM → Database）。
+
+```bash
+cd code/project/backend
+
+# 執行所有整合測試
+pytest tests/integration -v
+
+# 查看整合測試覆蓋率
+pytest tests/integration --cov=app --cov-report=term
+pytest tests/integration --cov=app --cov-report=html
+```
+
+### 查看合併覆蓋率
+```bash
+# 執行所有測試並查看總體覆蓋率
+pytest tests/ --cov=app --cov-report=term
+
+# 生成 HTML 詳細報告
+pytest tests/ --cov=app --cov-report=html
+
+# 查看詳細的未覆蓋行號
+pytest tests/ --cov=app --cov-report=term-missing
+```
+
+詳細測試文檔：
+- 單元測試: `code/project/backend/tests/unit/README.md`
+- 整合測試: `code/project/backend/tests/integration/README.md`
+
 ## 更新日期
 
 2025-12-24
+

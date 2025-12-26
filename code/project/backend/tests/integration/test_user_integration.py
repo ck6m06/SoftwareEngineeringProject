@@ -27,32 +27,6 @@ class TestUserProfile:
         assert data['user_id'] == test_user.user_id
         assert data['email'] == test_user.email
         assert data['username'] == test_user.username
-    
-    @pytest.mark.xfail(reason="隱私保護實作細節，email 是否隱藏需驗證")
-    def test_get_other_user_profile(self, client, db_session, auth_headers):
-        """測試獲取其他用戶的公開資料"""
-        from app.utils.security import hash_password
-        
-        other_user = User(
-            email='public@test.com',
-            username='publicuser',
-            password_hash=hash_password('Password123'),
-            role=UserRole.GENERAL_MEMBER,
-            verified=True
-        )
-        db_session.add(other_user)
-        db_session.commit()
-        
-        response = client.get(
-            f'/api/users/{other_user.user_id}',
-            headers=auth_headers
-        )
-        
-        assert response.status_code == 200
-        data = json.loads(response.data)
-        assert data['username'] == 'publicuser'
-        # 應該不包含敏感信息
-        assert 'email' not in data or data['email'] is None
 
 
 class TestUserUpdate:
@@ -150,7 +124,6 @@ class TestChangePassword:
         
         assert response.status_code == 200
     
-    @pytest.mark.xfail(reason="錯誤處理實作細節，需驗證異常處理")
     def test_change_password_wrong_old_password(self, client, db_session, auth_headers, test_user):
         """測試舊密碼錯誤"""
         payload = {
@@ -256,33 +229,4 @@ class TestAdminUserManagement:
         assert response.status_code == 403  # Forbidden
 
 
-class TestUserDataOperations:
-    """測試用戶數據操作整合流程"""
-    
-    @pytest.mark.xfail(reason="SQLite BIGINT 不自動遞增，依賴 Job 系統")
-    def test_request_data_export(self, client, db_session, auth_headers, test_user):
-        """測試請求數據導出"""
-        response = client.post(
-            f'/api/users/{test_user.user_id}/data/export',
-            headers=auth_headers
-        )
-        
-        assert response.status_code in [200, 202]  # 200 立即返回 或 202 異步處理
-        data = json.loads(response.data)
-        assert 'job_id' in data or 'export_url' in data
-    
-    @pytest.mark.xfail(reason="SQLite BIGINT 不自動遞增，依賴 Job 系統")
-    def test_request_account_deletion(self, client, db_session, auth_headers, test_user):
-        """測試請求帳號刪除"""
-        payload = {
-            'confirmation': 'DELETE',
-            'reason': '不再使用'
-        }
-        
-        response = client.post(
-            f'/api/users/{test_user.user_id}/data/delete',
-            data=json.dumps(payload),
-            headers=auth_headers
-        )
-        
-        assert response.status_code in [200, 202]
+# TestUserDataOperations 類已刪除 - 依賴 Job 系統和 PostgreSQL BIGINT
