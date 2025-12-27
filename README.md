@@ -403,18 +403,6 @@ docker compose exec backend bash -c "export PYTHONPATH=/app:\$PYTHONPATH && pyte
 docker compose exec backend bash -c "export PYTHONPATH=/app:\$PYTHONPATH && pytest tests/unit --cov=app/services/auth_service --cov=app/services/permission_service --cov-report=term-missing"
 ```
 
-**測試成果**:
-- ✅ **353 個單元測試全部通過**
-- ✅ **94% 服務層覆蓋率**（1641 statements, 91 missed）
-- ✅ **100% 覆蓋**：attachment_service, audit_service
-- ✅ **95%+ 覆蓋**：auth_service (95%), permission_service (97%)
-
-**測試架構說明**：
-本專案採用**服務層優先**測試策略，聚焦於 `app/services/` 的業務邏輯層：
-- 使用 Mock 技術隔離外部依賴（資料庫、MinIO、Redis、SMTP）
-- 透過 Fixture 提供可重複使用的測試資料
-- 每個測試獨立運行，確保結果可靠
-
 #### 後端整合測試
 
 **使用 Docker 執行測試**:
@@ -428,24 +416,6 @@ docker compose exec backend bash -c "export PYTHONPATH=/app:\$PYTHONPATH && pyte
 # 執行特定模組
 docker compose exec backend bash -c "export PYTHONPATH=/app:\$PYTHONPATH && pytest tests/integration/test_animal_integration.py -v"
 ```
-
-**整合測試成果**:
-- ✅ **高通過率** (認證系統完全修復)
-- ✅ **JWT 認證問題已解決** - 修正 token subject 類型錯誤
-- 📊 **核心功能測試**：
-  - Auth (認證系統): 7/7 tests ✅ 全部通過
-  - Medical (醫療紀錄): 6 tests
-  - Notification (通知系統): 8 tests
-  - Shelter (收容所管理): 10 tests
-  - User (使用者管理): 11 tests
-  - Animal (動物管理)、Application (申請管理)
-
-**整合測試說明**：
-- 整合測試使用 SQLite 記憶體資料庫（`:memory:`）
-- 驗證完整的 Route → Service → ORM → Database 流程
-- 測試涵蓋完整的 API 端點與業務流程
-- 每個測試獨立運行，確保測試間無互相影響
-- **已修復**: JWT token identity 類型問題（從整數改為字串）
 
 #### E2E測試
 ```bash
