@@ -1,0 +1,414 @@
+@startuml 使用案例2_5_送養刊登管理
+title 使用案例2.5: 送養刊登管理
+
+actor "管理員" as Admin
+participant "AdminDashboard.vue" as Dashboard
+participant "animals.ts" as AnimalAPI
+participant "animals.py(blueprint)" as AnimalBlueprint
+participant "animal_service.py" as AnimalService
+participant "permission_service.py" as PermissionService
+participant "notification_service.py" as NotificationService
+database "MySQL" as DB
+
+== 1. 進入管理後台 ==
+Admin -> Dashboard: 訪問 /admin/dashboard
+activate Dashboard
+Dashboard -> Dashboard: 檢查用戶登入狀態\n(authStore.user)
+Dashboard -> Dashboard: 檢查管理員權限\n(role === 'ADMIN')
+
+Dashboard -> AnimalAPI: loadStats()\n統計各狀態動物數量
+activate AnimalAPI
+loop 對每個狀態 (DRAFT, SUBMITTED, PUBLISHED, RETIRED)
+    AnimalAPI -> AnimalBlueprint: GET /animals?status={status}&per_page=1
+    activate AnimalBlueprint
+    AnimalBlueprint -> AnimalService: get_animals(filters, pagination)
+    activate AnimalService
+    AnimalService -> DB: SELECT COUNT(*) FROM animals\nWHERE status = ? AND deleted_at IS NULL
+    DB --> AnimalService: count
+    AnimalService --> AnimalBlueprint: {total, animals:[]}
+    deactivate AnimalService
+    AnimalBlueprint --> AnimalAPI: {total, animals, page, pages}
+    deactivate AnimalBlueprint
+end
+AnimalAPI --> Dashboard: stats {draft, submitted, published, retired}
+deactivate AnimalAPI
+
+Dashboard -> AnimalAPI: loadAnimals()\nGET animals by status
+activate AnimalAPI
+AnimalAPI -> AnimalBlueprint: GET /animals?status=SUBMITTED&page=1&per_page=20
+activate AnimalBlueprint
+AnimalBlueprint -> AnimalService: get_animals(filters, pagination)
+activate AnimalService
+AnimalService -> DB: SELECT * FROM animals\nWHERE status='SUBMITTED'\nAND deleted_at IS NULL\nORDER BY created_at DESC\nLIMIT 20 OFFSET 0
+DB --> AnimalService: animals[]
+AnimalService --> AnimalBlueprint: {animals, total, page, pages}
+deactivate AnimalService
+AnimalBlueprint --> AnimalAPI: {animals[], total, page, pages}
+deactivate AnimalBlueprint
+AnimalAPI --> Dashboard: animals[]
+deactivate AnimalAPI
+
+Dashboard --> Admin: 顯示統計卡片與待審核動物列表\n(包含動物名稱、物種、送養者、提交時間)
+
+note right
+  統計卡片顯示:
+  - 待審核動物 (SUBMITTED)
+  - 已發布動物 (PUBLISHED)
+  - 草稿動物 (DRAFT)
+  - 已下架動物 (RETIRED)
+  
+  動物列表顯示:
+  - 基本資訊 (名稱、物種、性別、年齡)
+  - 送養者資訊 (姓名、聯絡方式)
+  - 提交時間
+  - 當前狀態
+  - 如有拒絕原因則顯示
+end note
+
+== 2. 審核送養 - 核准發布 ==
+Admin -> Dashboard: 點選「核准發布」按鈕
+Dashboard -> Dashboard: 顯示確認對話框
+Admin -> Dashboard: 確認核准
+
+Dashboard -> AnimalAPI: publishAnimal(animalId)
+activate AnimalAPI
+AnimalAPI -> AnimalBlueprint: POST /animals/{animalId}/publish
+activate AnimalBlueprint
+AnimalBlueprint -> AnimalBlueprint: 驗證 JWT Token\n取得 current_user_id
+AnimalBlueprint -> DB: SELECT * FROM users WHERE user_id = ?
+DB --> AnimalBlueprint: current_user
+
+AnimalBlueprint -> AnimalService: publish_animal(animal_id, admin)
+activate AnimalService
+AnimalService -> DB: SELECT * FROM animals\nWHERE animal_id = ? AND deleted_at IS NULL
+DB --> AnimalService: animal
+
+AnimalService -> PermissionService: can_publish_animal(admin, animal)
+activate PermissionService
+PermissionService -> PermissionService: 檢查 admin.role == 'ADMIN'
+PermissionService --> AnimalService: True
+deactivate PermissionService
+
+AnimalService -> AnimalService: 驗證狀態\n(不能是 PUBLISHED)
+AnimalService -> DB: UPDATE animals\nSET status = 'PUBLISHED', updated_at = NOW()\nWHERE animal_id = ?
+DB --> AnimalService: 更新成功
+
+AnimalService -> NotificationService: create_notification(\ntype='ANIMAL_PUBLISHED',\nuser_id=animal.created_by,\nrelated_id=animal_id,\nmessage='您的送養刊登已通過審核')
+activate NotificationService
+NotificationService -> DB: INSERT INTO notifications\n(type, user_id, related_animal_id, message, is_read, created_at)
+DB --> NotificationService: notification created
+NotificationService --> AnimalService: notification
+deactivate NotificationService
+
+AnimalService --> AnimalBlueprint: animal (已發布)
+deactivate AnimalService
+
+AnimalBlueprint --> AnimalAPI: {'message': '動物已發布', 'animal': animal.to_dict()}
+deactivate AnimalBlueprint
+AnimalAPI --> Dashboard: success response
+deactivate AnimalAPI
+
+Dashboard -> Dashboard: 顯示成功提示
+Dashboard -> Dashboard: loadAnimals() 重新載入列表
+Dashboard -> Dashboard: loadStats() 更新統計
+Dashboard --> Admin: 顯示「動物已發布」訊息\n列表已更新
+
+note right
+  核准發布流程:
+  1. 權限檢查 (必須是管理員)
+  2. 狀態驗證 (不能重複發布)
+  3. 更新狀態為 PUBLISHED
+  4. 發送通知給送養者
+  5. 更新前端列表
+end note
+
+== 3. 審核送養 - 拒絕批准 ==
+Admin -> Dashboard: 點選「不核准」按鈕
+activate Dashboard
+Dashboard -> Dashboard: openRejectModal(animalId)\n顯示拒絕原因 Modal
+Dashboard --> Admin: 顯示拒絕原因輸入表單
+
+Admin -> Dashboard: 填寫拒絕原因\n(必填欄位)
+Admin -> Dashboard: 點選「確認拒絕」
+
+Dashboard -> Dashboard: 驗證拒絕原因不為空
+Dashboard -> AnimalAPI: rejectAnimal(animalId, rejectionReason)
+activate AnimalAPI
+AnimalAPI -> AnimalBlueprint: POST /animals/{animalId}/reject\n{rejection_reason: "..."}
+activate AnimalBlueprint
+AnimalBlueprint -> AnimalBlueprint: 驗證 JWT Token\n取得 current_user
+AnimalBlueprint -> AnimalBlueprint: 驗證拒絕原因不為空
+
+AnimalBlueprint -> AnimalService: reject_animal(animal_id, admin, rejection_reason)
+activate AnimalService
+AnimalService -> DB: SELECT * FROM animals\nWHERE animal_id = ? AND deleted_at IS NULL
+DB --> AnimalService: animal
+
+AnimalService -> PermissionService: can_reject_animal(admin, animal)
+activate PermissionService
+PermissionService -> PermissionService: 檢查 admin.role == 'ADMIN'
+PermissionService --> AnimalService: True
+deactivate PermissionService
+
+AnimalService -> AnimalService: 驗證狀態必須是 SUBMITTED
+AnimalService -> AnimalService: 驗證拒絕原因不為空
+
+AnimalService -> DB: UPDATE animals\nSET status = 'DRAFT',\n    rejection_reason = ?,\n    rejected_by = ?,\n    rejected_at = NOW(),\n    updated_at = NOW()\nWHERE animal_id = ?
+DB --> AnimalService: 更新成功
+
+AnimalService -> NotificationService: create_notification(\ntype='ANIMAL_REJECTED',\nuser_id=animal.created_by,\nrelated_id=animal_id,\nmessage='您的送養刊登未通過審核')
+activate NotificationService
+NotificationService -> DB: INSERT INTO notifications\n(type, user_id, related_animal_id, message, is_read)
+DB --> NotificationService: notification created
+NotificationService --> AnimalService: notification
+deactivate NotificationService
+
+AnimalService --> AnimalBlueprint: animal (已拒絕)
+deactivate AnimalService
+
+AnimalBlueprint --> AnimalAPI: {'message': '已拒絕批准,動物狀態改為草稿', 'animal': animal.to_dict()}
+deactivate AnimalBlueprint
+AnimalAPI --> Dashboard: success response
+deactivate AnimalAPI
+
+Dashboard -> Dashboard: closeRejectModal()\n關閉 Modal
+Dashboard -> Dashboard: 顯示成功提示
+Dashboard -> Dashboard: loadAnimals() 重新載入列表
+Dashboard -> Dashboard: loadStats() 更新統計
+Dashboard --> Admin: 顯示「已拒絕批准,並已通知送養者」\n列表已更新
+deactivate Dashboard
+
+note right
+  拒絕批准流程:
+  1. 權限檢查 (必須是管理員)
+  2. 狀態驗證 (只能拒絕 SUBMITTED)
+  3. 拒絕原因必填
+  4. 更新狀態為 DRAFT
+  5. 記錄拒絕原因、拒絕者、拒絕時間
+  6. 發送通知給送養者
+  7. 送養者可修改後重新提交
+end note
+
+== 4. 下架送養刊登 ==
+Admin -> Dashboard: 切換到「已發布」頁籤\n(currentStatus = 'PUBLISHED')
+activate Dashboard
+Dashboard -> AnimalAPI: loadAnimals(status='PUBLISHED')
+activate AnimalAPI
+AnimalAPI -> AnimalBlueprint: GET /animals?status=PUBLISHED
+activate AnimalBlueprint
+AnimalBlueprint -> AnimalService: get_animals(filters)
+activate AnimalService
+AnimalService -> DB: SELECT * FROM animals\nWHERE status='PUBLISHED'\nAND deleted_at IS NULL
+DB --> AnimalService: animals[]
+AnimalService --> AnimalBlueprint: animals[]
+deactivate AnimalService
+AnimalBlueprint --> AnimalAPI: {animals[], total}
+deactivate AnimalBlueprint
+AnimalAPI --> Dashboard: animals[]
+deactivate AnimalAPI
+Dashboard --> Admin: 顯示已發布的動物列表
+
+Admin -> Dashboard: 點選「下架」按鈕
+Dashboard -> Dashboard: 顯示確認對話框
+Admin -> Dashboard: 確認下架
+
+Dashboard -> AnimalAPI: retireAnimal(animalId)
+activate AnimalAPI
+AnimalAPI -> AnimalBlueprint: POST /animals/{animalId}/retire
+activate AnimalBlueprint
+AnimalBlueprint -> AnimalBlueprint: 驗證 JWT Token\n取得 current_user
+
+AnimalBlueprint -> AnimalService: retire_animal(animal_id, user)
+activate AnimalService
+AnimalService -> DB: SELECT * FROM animals\nWHERE animal_id = ? AND deleted_at IS NULL
+DB --> AnimalService: animal
+
+AnimalService -> PermissionService: can_retire_animal(user, animal)
+activate PermissionService
+PermissionService -> PermissionService: 檢查 user.role == 'ADMIN'\nOR user.user_id == animal.created_by
+PermissionService --> AnimalService: True
+deactivate PermissionService
+
+AnimalService -> AnimalService: 驗證狀態必須是 PUBLISHED
+AnimalService -> DB: UPDATE animals\nSET status = 'RETIRED', updated_at = NOW()\nWHERE animal_id = ?
+DB --> AnimalService: 更新成功
+
+AnimalService -> NotificationService: create_notification(\ntype='ANIMAL_RETIRED',\nuser_id=animal.created_by,\nrelated_id=animal_id)
+activate NotificationService
+NotificationService -> DB: INSERT INTO notifications
+DB --> NotificationService: notification created
+NotificationService --> AnimalService: notification
+deactivate NotificationService
+
+AnimalService --> AnimalBlueprint: animal (已下架)
+deactivate AnimalService
+
+AnimalBlueprint --> AnimalAPI: {'message': '動物已下架', 'animal': animal.to_dict()}
+deactivate AnimalBlueprint
+AnimalAPI --> Dashboard: success response
+deactivate AnimalAPI
+
+Dashboard -> Dashboard: 顯示成功提示
+Dashboard -> Dashboard: loadAnimals() 重新載入列表
+Dashboard -> Dashboard: loadStats() 更新統計
+Dashboard --> Admin: 顯示「動物已下架」訊息\n列表已更新
+deactivate Dashboard
+
+note right
+  下架流程:
+  1. 權限檢查 (管理員或送養者本人)
+  2. 狀態驗證 (只能下架 PUBLISHED)
+  3. 更新狀態為 RETIRED
+  4. 發送通知
+  5. 下架的動物不再顯示在公開列表
+end note
+
+== 5. 批次操作 - 批次核准發布 ==
+Admin -> Dashboard: 選擇多個待審核動物\n(toggleAnimal 勾選)
+activate Dashboard
+Dashboard -> Dashboard: selectedAnimals[] 記錄選中的 ID
+Dashboard --> Admin: 顯示批次操作按鈕\n「批次核准發布 (N隻)」
+
+Admin -> Dashboard: 點選「批次核准發布」按鈕
+Dashboard -> Dashboard: 顯示確認對話框\n「確定要批次核准發布 N 隻動物嗎？」
+Admin -> Dashboard: 確認批次核准
+
+Dashboard -> Dashboard: batchOperation('publish')
+Dashboard -> Dashboard: batchProcessing = true
+
+loop 對每個選中的動物 ID
+    Dashboard -> AnimalAPI: publishAnimal(animalId)
+    activate AnimalAPI
+    AnimalAPI -> AnimalBlueprint: POST /animals/{animalId}/publish
+    activate AnimalBlueprint
+    AnimalBlueprint -> AnimalService: publish_animal(animal_id, admin)
+    activate AnimalService
+    AnimalService -> DB: UPDATE animals SET status='PUBLISHED'
+    DB --> AnimalService: success
+    AnimalService -> NotificationService: create_notification(ANIMAL_PUBLISHED)
+    activate NotificationService
+    NotificationService -> DB: INSERT notification
+    DB --> NotificationService: created
+    deactivate NotificationService
+    AnimalService --> AnimalBlueprint: animal
+    deactivate AnimalService
+    AnimalBlueprint --> AnimalAPI: success
+    deactivate AnimalBlueprint
+    AnimalAPI --> Dashboard: success (successCount++)
+    deactivate AnimalAPI
+    
+    alt 某個動物處理失敗
+        Dashboard -> Dashboard: failedCount++\nerrors.push(錯誤訊息)
+    end
+end
+
+Dashboard -> Dashboard: batchProcessing = false
+Dashboard -> Dashboard: 顯示批次結果\n「成功: N隻, 失敗: M隻」
+Dashboard -> Dashboard: selectedAnimals = []\n清空選擇
+Dashboard -> Dashboard: loadAnimals()\nloadStats()
+Dashboard --> Admin: 顯示批次操作結果訊息\n列表已更新
+deactivate Dashboard
+
+note right
+  批次操作特性:
+  1. 支援批次核准發布
+  2. 支援批次下架
+  3. 支援批次拒絕
+  4. 逐一處理每個動物
+  5. 統計成功與失敗數量
+  6. 顯示詳細錯誤訊息
+  7. 失敗不影響其他動物繼續處理
+end note
+
+== 6. 批次操作 - 批次拒絕 ==
+Admin -> Dashboard: 選擇多個待審核動物
+activate Dashboard
+Admin -> Dashboard: 點選「批次拒絕」按鈕
+
+Dashboard -> Dashboard: openBatchRejectModal()\nisBatchReject = true
+Dashboard --> Admin: 顯示批次拒絕 Modal\n(列出選中的動物名稱)
+
+Admin -> Dashboard: 填寫統一的拒絕原因
+Admin -> Dashboard: 點選「確認批次拒絕」
+
+Dashboard -> Dashboard: 驗證拒絕原因不為空
+Dashboard -> Dashboard: batchProcessing = true
+
+loop 對每個選中的動物 ID
+    Dashboard -> AnimalAPI: rejectAnimal(animalId, rejectionReason)
+    activate AnimalAPI
+    AnimalAPI -> AnimalBlueprint: POST /animals/{animalId}/reject\n{rejection_reason}
+    activate AnimalBlueprint
+    AnimalBlueprint -> AnimalService: reject_animal(animal_id, admin, reason)
+    activate AnimalService
+    AnimalService -> DB: UPDATE animals\nSET status='DRAFT', rejection_reason=?
+    DB --> AnimalService: success
+    AnimalService -> NotificationService: create_notification(ANIMAL_REJECTED)
+    activate NotificationService
+    NotificationService -> DB: INSERT notification
+    DB --> NotificationService: created
+    deactivate NotificationService
+    AnimalService --> AnimalBlueprint: animal
+    deactivate AnimalService
+    AnimalBlueprint --> AnimalAPI: success
+    deactivate AnimalBlueprint
+    AnimalAPI --> Dashboard: success (successCount++)
+    deactivate AnimalAPI
+    
+    alt 某個動物處理失敗
+        Dashboard -> Dashboard: failedCount++\nerrors.push(錯誤訊息)
+    end
+end
+
+Dashboard -> Dashboard: batchProcessing = false
+Dashboard -> Dashboard: closeRejectModal()
+Dashboard -> Dashboard: 顯示批次結果\n「成功: N隻, 失敗: M隻」
+Dashboard -> Dashboard: selectedAnimals = []\n清空選擇
+Dashboard -> Dashboard: loadAnimals()\nloadStats()
+Dashboard --> Admin: 顯示批次拒絕結果訊息\n列表已更新
+deactivate Dashboard
+
+note right
+  批次拒絕特點:
+  1. 所有選中動物使用相同拒絕原因
+  2. 顯示選中動物名稱供確認
+  3. 拒絕原因為必填欄位
+  4. 逐一處理並記錄結果
+  5. 每個動物都會收到通知
+end note
+
+== 7. 切換狀態頁籤 ==
+Admin -> Dashboard: 點選不同狀態頁籤\n(例: 「已發布」、「已下架」)
+activate Dashboard
+Dashboard -> Dashboard: currentStatus = 選中的狀態
+Dashboard -> Dashboard: selectedAnimals = []\n清空選擇
+Dashboard -> Dashboard: loadAnimals(status=currentStatus)
+activate AnimalAPI
+AnimalAPI -> AnimalBlueprint: GET /animals?status={currentStatus}
+activate AnimalBlueprint
+AnimalBlueprint -> AnimalService: get_animals(filters)
+activate AnimalService
+AnimalService -> DB: SELECT * FROM animals\nWHERE status = ? AND deleted_at IS NULL
+DB --> AnimalService: animals[]
+AnimalService --> AnimalBlueprint: animals[]
+deactivate AnimalService
+AnimalBlueprint --> AnimalAPI: {animals[], total}
+deactivate AnimalBlueprint
+AnimalAPI --> Dashboard: animals[]
+deactivate AnimalAPI
+Dashboard --> Admin: 顯示對應狀態的動物列表\n(操作按鈕根據狀態變化)
+deactivate Dashboard
+
+note right
+  不同狀態頁籤顯示不同操作:
+  - 待審核 (SUBMITTED): 核准/拒絕
+  - 已發布 (PUBLISHED): 下架
+  - 草稿 (DRAFT): 無管理操作
+  - 已下架 (RETIRED): 無管理操作
+  
+  支援批次操作的狀態:
+  - SUBMITTED: 批次核准、批次拒絕
+  - PUBLISHED: 批次下架
+end note
+
+@enduml

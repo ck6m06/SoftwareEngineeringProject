@@ -1,6 +1,6 @@
-<testsuites id="" name="" tests="5" failures="0" skipped="0" errors="0" time="19.625555">
-<testsuite name="critical-paths\rehome-publishing.spec.ts" timestamp="2025-12-10T10:03:44.583Z" hostname="chromium" tests="1" failures="0" skipped="0" time="14.853" errors="0">
-<testcase name="P0-2 送養發布流程 › P0-2-003 完整提交流程驗證（使用真實照片）" classname="critical-paths\rehome-publishing.spec.ts" time="14.853">
+<testsuites id="" name="" tests="5" failures="0" skipped="0" errors="0" time="16.806768">
+<testsuite name="critical-paths\rehome-publishing.spec.ts" timestamp="2025-12-27T11:27:31.473Z" hostname="chromium" tests="1" failures="0" skipped="0" time="11.974" errors="0">
+<testcase name="P0-2 送養發布流程 › P0-2-003 完整提交流程驗證（使用真實照片）" classname="critical-paths\rehome-publishing.spec.ts" time="11.974">
 <system-out>
 <![CDATA[ 開始 P0-2 完整送養測試（含真實照片）
 🔑 正在登入測試用戶: user@test.com
@@ -37,18 +37,18 @@
 </system-out>
 </testcase>
 </testsuite>
-<testsuite name="smoke.spec.ts" timestamp="2025-12-10T10:03:44.583Z" hostname="chromium" tests="4" failures="0" skipped="0" time="24.471" errors="0">
-<testcase name="煙霧測試 (Smoke Tests) › 網站基本可訪問性" classname="smoke.spec.ts" time="7.435">
+<testsuite name="smoke.spec.ts" timestamp="2025-12-27T11:27:31.473Z" hostname="chromium" tests="4" failures="0" skipped="0" time="10.088" errors="0">
+<testcase name="煙霧測試 (Smoke Tests) › 網站基本可訪問性" classname="smoke.spec.ts" time="2.879">
 </testcase>
-<testcase name="煙霧測試 (Smoke Tests) › 後端服務連接" classname="smoke.spec.ts" time="3.415">
+<testcase name="煙霧測試 (Smoke Tests) › 後端服務連接" classname="smoke.spec.ts" time="1.602">
 <system-out>
 <![CDATA[✅ 後端服務正常運行
 ]]>
 </system-out>
 </testcase>
-<testcase name="煙霧測試 (Smoke Tests) › 基本響應式佈局" classname="smoke.spec.ts" time="6.562">
+<testcase name="煙霧測試 (Smoke Tests) › 基本響應式佈局" classname="smoke.spec.ts" time="2.612">
 </testcase>
-<testcase name="煙霧測試 (Smoke Tests) › 網路資源載入" classname="smoke.spec.ts" time="7.059">
+<testcase name="煙霧測試 (Smoke Tests) › 網路資源載入" classname="smoke.spec.ts" time="2.995">
 </testcase>
 </testsuite>
 </testsuites>

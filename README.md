@@ -16,8 +16,6 @@
 - [API 文檔](#-api-文檔)
 - [測試帳號](#-測試帳號)
 - [開發指南](#-開發指南)
-- [專案文檔](#-專案文檔)
-- [版本歷史](#-版本歷史)
 
 ---
 
@@ -110,48 +108,71 @@ docker compose exec backend python create_test_accounts.py
 ## 📁 專案結構
 
 ```
-code/
-├── project/              # 主要專案代碼
-│   ├── backend/          # Flask 後端應用
-│   │   ├── app/          # 應用主目錄
-│   │   │   ├── blueprints/    # API 路由模組
-│   │   │   ├── models/        # SQLAlchemy 模型
-│   │   │   ├── services/      # 業務邏輯層
-│   │   │   └── utils/         # 工具函數
-│   │   ├── migrations/        # Alembic 遷移檔案
-│   │   ├── config.py          # 設定檔
-│   │   ├── requirements.txt   # Python 依賴
-│   │   └── run.py             # 應用入口
-│   ├── frontend/         # Vue 3 前端應用
-│   │   ├── src/
-│   │   │   ├── api/           # API 客戶端模組
-│   │   │   ├── components/    # Vue 組件
-│   │   │   ├── composables/   # Composition API
-│   │   │   ├── pages/         # 頁面組件
-│   │   │   ├── router/        # 路由設定
-│   │   │   ├── stores/        # Pinia 狀態管理
-│   │   │   └── types/         # TypeScript 類型
-│   │   └── package.json
-│   ├── docker/           # Docker 相關檔案
-│   ├── BatchUploadExample/    # 批次上傳範例
-│   └── docker-compose.yml     # Docker Compose 設定
-└── docs/                 # 完整專案文檔
-    ├── api-tests/        # API 測試報告
-    ├── fixes/            # 問題修復文檔
-    ├── guides/           # 使用指南
-    ├── logs/             # 系統日誌
-    ├── refactoring/      # 重構文檔
-    ├── reports/          # 各類報告
-    ├── scripts/          # 測試腳本
-    └── test-plans/       # 測試計劃
+SoftwareEngineeringProject/
+├── README.md                    # 專案主文檔
+├── code/
+│   ├── project/                 # 主要專案代碼
+│   │   ├── backend/             # Flask 後端應用
+│   │   │   ├── app/             # 應用主目錄
+│   │   │   │   ├── blueprints/  # API 路由模組
+│   │   │   │   ├── models/      # SQLAlchemy 模型
+│   │   │   │   ├── services/    # 業務邏輯層
+│   │   │   │   ├── tasks/       # Celery 背景任務
+│   │   │   │   ├── templates/   # 郵件模板
+│   │   │   │   ├── utils/       # 工具函數
+│   │   │   │   └── celery.py    # Celery 設定
+│   │   │   ├── migrations/      # Alembic 遷移檔案
+│   │   │   ├── tests/           # 後端測試
+│   │   │   │   ├── unit/        # 單元測試
+│   │   │   │   └── integration/ # 整合測試
+│   │   │   ├── scripts/         # 輔助腳本
+│   │   │   ├── config.py        # 設定檔
+│   │   │   ├── requirements.txt # Python 依賴
+│   │   │   ├── run.py           # 應用入口
+│   │   │   └── create_test_accounts.py  # 測試帳號生成工具
+│   │   ├── frontend/            # Vue 3 前端應用
+│   │   │   ├── src/
+│   │   │   │   ├── api/         # API 客戶端模組
+│   │   │   │   ├── components/  # Vue 組件
+│   │   │   │   ├── composables/ # Composition API
+│   │   │   │   ├── pages/       # 頁面組件
+│   │   │   │   ├── router/      # 路由設定
+│   │   │   │   ├── stores/      # Pinia 狀態管理
+│   │   │   │   └── types/       # TypeScript 類型
+│   │   │   ├── tests/           # 前端測試
+│   │   │   │   └── e2e/         # E2E 測試 (Playwright)
+│   │   │   ├── index.html
+│   │   │   ├── package.json
+│   │   │   ├── vite.config.ts
+│   │   │   ├── tailwind.config.js
+│   │   │   └── playwright.config.ts
+│   │   ├── docker/              # Docker 相關檔案
+│   │   ├── BatchUploadExample/  # 批次上傳範例
+│   │   ├── docker-compose.yml   # Docker Compose 設定
+│   │   └── .env.example         # 環境變數範例
+│   └── docs/                    # 完整專案文檔
+│       ├── api-tests/           # API 測試報告
+│       ├── develop-plans/       # 開發計劃與測試指南
+│       ├── fixes/               # 問題修復文檔
+│       ├── guides/              # 使用指南
+│       ├── logs/                # 系統日誌
+│       ├── refactoring/         # 重構文檔
+│       ├── reports/             # 各類報告
+│       ├── scripts/             # 測試腳本
+│       ├── sequence_diagram/    # 序列圖
+│       ├── test_plan/           # 測試計劃
+│       ├── development.md       # 開發文檔
+│       └── FOLDER_STRUCTURE.md  # 完整目錄結構
+├── docs/                        # 文件與圖片資源
+│   ├── 文件C_img/
+│   └── sd_img/
+├── doctemp/                     # 文檔模板
+│   └── specs/
+└── web-bundles/                 # Web 資源包
+    ├── agents/
+    ├── expansion-packs/
+    └── teams/
 ```
-
-<details>
-<summary><b>查看完整目錄結構</b></summary>
-
-詳細的檔案結構請參考 [FOLDER_STRUCTURE.md](code/docs/FOLDER_STRUCTURE.md)
-
-</details>
 
 ---
 
@@ -426,134 +447,16 @@ docker compose exec backend bash -c "export PYTHONPATH=/app:\$PYTHONPATH && pyte
 - 每個測試獨立運行，確保測試間無互相影響
 - **已修復**: JWT token identity 類型問題（從整數改為字串）
 
-**前端測試**:
+#### E2E測試
 ```bash
 cd code/project/frontend
-npm run test:e2e       # E2E 測試
+
+# 執行領養流程測試
+npx playwright test final-e2e.spec.ts --headed
+
+# 執行註冊流程測試
+npx playwright test registration-flow.spec.ts --headed
+
+# 執行所有 E2E 測試
+npx playwright test --headed
 ```
-
-### 常見問題
-
-#### Q: 通知下拉選單點擊後立即關閉？
-使用 `@click.stop` 修飾符阻止事件冒泡。參考 `frontend/src/components/NotificationBell.vue`
-
-#### Q: 儲存草稿沒有呼叫 API？
-確保 `saveDraft()` 函數正確呼叫 `createAnimal()` 或 `updateAnimal()`。參考 `frontend/src/pages/RehomeForm.vue`
-
-#### Q: 測試帳號無法登入？
-可能是帳號被軟刪除，使用以下 SQL 恢復：
-```sql
-UPDATE users SET deleted_at = NULL WHERE email = 'admin@test.com';
-```
-
-更多問題請參考 [code/docs/fixes/ISSUES_AND_SOLUTIONS.md](code/docs/fixes/ISSUES_AND_SOLUTIONS.md) 的問題解決方案。
-
-詳細的開發指南請參考：
-- [開發文檔](code/docs/development.md)
-- [Celery Worker 指南](code/docs/guides/CELERY_WORKER_GUIDE.md)
-- [任務審批指南](code/docs/guides/JOB_APPROVAL_GUIDE.md)
-- [通知觸發指南](code/docs/guides/NOTIFICATION_TRIGGERS_GUIDE.md)
-
----
-
-## 📚 專案文檔
-
-### 核心文檔
-- [專案概述](code/docs/README.md) - 專案整體說明
-- [資料夾結構](code/docs/FOLDER_STRUCTURE.md) - 完整目錄結構
-- [開發文檔](code/docs/development.md) - 開發環境與流程
-- [序列圖說明](code/docs/SEQUENCE_DIAGRAMS_README.md) - 系統互動流程
-
-### 測試與驗證
-- [API 測試報告](code/docs/api-tests/API_TEST_REPORT.md)
-- [API 驗證報告](code/docs/api-tests/API_VALIDATION_REPORT.md)
-- [前端測試報告](code/docs/reports/FRONTEND_TEST_REPORT.md)
-- [初始化測試報告](code/docs/reports/INITIALIZATION_TEST_REPORT.md)
-- [測試計劃](code/docs/test-plans/) - Phase 1-9 完整測試指南
-
-### 問題修復
-- [修復記錄](code/docs/fixes/FIXES.md) - 所有修復的問題
-- [問題與解決方案](code/docs/fixes/ISSUES_AND_SOLUTIONS.md)
-- [草稿儲存修復](code/docs/fixes/DRAFT_SAVE_FIX.md)
-- [通知下拉選單修復](code/docs/fixes/NOTIFICATION_DROPDOWN_FIX.md)
-- [時區遷移](code/docs/fixes/TIMEZONE_MIGRATION.md)
-
-### 重構文檔
-- [重構指南](code/docs/refactoring/REFACTORING_GUIDE.md)
-- [重構進度](code/docs/refactoring/REFACTORING_PROGRESS.md)
-- [重構完成報告](code/docs/refactoring/REFACTORING_COMPLETE.md)
-- [最終重構報告](code/docs/refactoring/REFACTORING_FINAL_REPORT.md)
-
-### 系統報告
-- [架構審查](code/docs/reports/ARCHITECTURE_REVIEW.md)
-- [部署成功報告](code/docs/reports/DEPLOYMENT_SUCCESS.md)
-- [實作計劃](code/docs/reports/IMPLEMENTATION_PLAN.md)
-- [系統修復報告](code/docs/reports/SYSTEM_FIXES_REPORT.md)
-- [問題狀態報告](code/docs/reports/ISSUES_STATUS_REPORT.md)
-
-### 使用指南
-- [Celery Worker 指南](code/docs/guides/CELERY_WORKER_GUIDE.md)
-- [建立測試帳號指南](code/docs/guides/CREATE_TEST_ACCOUNTS_GUIDE.md)
-- [任務審批指南](code/docs/guides/JOB_APPROVAL_GUIDE.md)
-- [通知觸發指南](code/docs/guides/NOTIFICATION_TRIGGERS_GUIDE.md)
-
----
-
-## 📋 版本歷史
-
-- **v0.3.0** (2024-12-25) - 時區修正、MinIO 整合、文檔完善
-- **v0.2.0** (2024-11-15) - 通知系統、任務審批、用戶管理完整實作
-- **v0.1.0** (2024-10-01) - 核心功能實作（動物管理、申請審核）
-
----
-
-## 📄 授權
-
-本專案僅供教育用途使用。
-
----
-
-## 🙏 致謝
-
-感謝所有貢獻者對本專案的支持與協助。
-- ✅ 草稿只儲存到 localStorage 問題
-- ✅ AdminUsers.vue 編譯錯誤
-- ✅ 軟刪除帳號登入問題
-- ✅ AdminDashboard 載入錯誤
-
-### 技術改進
-- 優化事件處理機制 (v-click-outside directive)
-- 改進 API 錯誤處理
-- 增強表單驗證
-- 完善測試帳號管理
-
----
-
-## 📄 授權
-
-本專案僅供學習使用。
-
-## 開發團隊
-
-軟體工程專案 - 中期作業
-
----
-
-## 📋 版本歷史
-
-- v0.3.0 (2024-10-26) - 通知系統、任務審批、用戶管理完整實作
-  - 新增通知系統 (7 種通知類型)
-  - 新增任務審批流程
-  - 新增用戶管理介面
-  - 修復草稿儲存問題
-  - 修復通知下拉選單問題
-  - 完善測試帳號管理
-- v0.2.0 (2025-10-24) - 核心功能實作
-  - 動物管理功能
-  - 申請審核系統
-  - 收容所管理
-  - 醫療記錄管理
-- v0.1.0 (2025-10-22) - 初始專案架構建立
-  - 前後端分離架構
-  - Docker Compose 環境
-  - 基礎認證系統
