@@ -105,7 +105,7 @@ class TestChangePassword:
         test_user.password_hash = hash_password('OldPassword123')
         db_session.commit()
         
-        token = create_access_token(identity=test_user.user_id)
+        token = create_access_token(identity=str(test_user.user_id))
         headers = {
             'Authorization': f'Bearer {token}',
             'Content-Type': 'application/json'

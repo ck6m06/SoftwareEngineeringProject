@@ -35,7 +35,7 @@ class TestApplicationCreate:
         db_session.commit()
         
         # 使用申請人的 token
-        applicant_token = create_access_token(identity=applicant.user_id)
+        applicant_token = create_access_token(identity=str(applicant.user_id))
         applicant_headers = {
             'Authorization': f'Bearer {applicant_token}',
             'Content-Type': 'application/json'
@@ -134,7 +134,7 @@ class TestApplicationCreate:
         db_session.commit()
         
         # 使用申請人的 token
-        applicant_token = create_access_token(identity=applicant.user_id)
+        applicant_token = create_access_token(identity=str(applicant.user_id))
         applicant_headers = {
             'Authorization': f'Bearer {applicant_token}',
             'Content-Type': 'application/json'
@@ -339,7 +339,7 @@ class TestApplicationReview:
         db_session.commit()
         
         # 使用無權限的用戶嘗試審核
-        token = create_access_token(identity=other_user.user_id)
+        token = create_access_token(identity=str(other_user.user_id))
         headers = {
             'Authorization': f'Bearer {token}',
             'Content-Type': 'application/json'
@@ -450,7 +450,7 @@ class TestApplicationDetail:
         db_session.commit()
         
         # user2 嘗試查看
-        token = create_access_token(identity=user2.user_id)
+        token = create_access_token(identity=str(user2.user_id))
         headers = {
             'Authorization': f'Bearer {token}',
             'Content-Type': 'application/json'

@@ -37,7 +37,7 @@ class TestMedicalRecordCreate:
         """測試為不存在的動物創建醫療記錄"""
         from flask_jwt_extended import create_access_token
         
-        token = create_access_token(identity=test_shelter_member.user_id)
+        token = create_access_token(identity=str(test_shelter_member.user_id))
         headers = {
             'Authorization': f'Bearer {token}',
             'Content-Type': 'application/json'
@@ -122,7 +122,7 @@ class TestMedicalRecordUpdate:
         from flask_jwt_extended import create_access_token
         from app.utils.datetime_helper import get_naive_taipei_now
         
-        token = create_access_token(identity=test_shelter_member.user_id)
+        token = create_access_token(identity=str(test_shelter_member.user_id))
         headers = {
             'Authorization': f'Bearer {token}',
             'Content-Type': 'application/json'

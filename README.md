@@ -364,43 +364,22 @@ docker compose logs -f celery-worker
 
 #### 後端單元測試
 
-**本地執行測試**:
-```bash
-# 切換到 backend 目錄
-cd code/project/backend
-
-# 執行所有測試（詳細輸出）
-pytest tests/unit -v
-
-# 執行所有測試（簡化輸出）
-pytest tests/unit -q
-
-# 生成覆蓋率報告
-pytest tests/unit --cov=app/services --cov-report=term --cov-report=html
-
-# 查看特定服務的覆蓋率
-pytest tests/unit --cov=app/services/auth_service --cov=app/services/permission_service --cov-report=term-missing
-```
-
-**查看 HTML 覆蓋率報告**:
-```bash
-# Windows
-start htmlcov\index.html
-
-# Linux / macOS
-open htmlcov/index.html
-```
-
 **使用 Docker 執行測試**:
 ```bash
 # 在專案根目錄
 cd code/project
 
-# 執行所有測試
-docker compose exec backend pytest tests/unit -v
+# 執行所有測試（詳細輸出）
+docker compose exec backend bash -c "export PYTHONPATH=/app:\$PYTHONPATH && pytest tests/unit -v"
+
+# 執行所有測試（簡化輸出）
+docker compose exec backend bash -c "export PYTHONPATH=/app:\$PYTHONPATH && pytest tests/unit -q"
 
 # 生成覆蓋率報告
-docker compose exec backend pytest tests/unit --cov=app/services --cov-report=term
+docker compose exec backend bash -c "export PYTHONPATH=/app:\$PYTHONPATH && pytest tests/unit --cov=app/services --cov-report=term --cov-report=html"
+
+# 查看特定服務的覆蓋率
+docker compose exec backend bash -c "export PYTHONPATH=/app:\$PYTHONPATH && pytest tests/unit --cov=app/services/auth_service --cov=app/services/permission_service --cov-report=term-missing"
 ```
 
 **測試成果**:
@@ -417,51 +396,35 @@ docker compose exec backend pytest tests/unit --cov=app/services --cov-report=te
 
 #### 後端整合測試
 
-**本地執行測試**:
-```bash
-# 切換到 backend 目錄
-cd code/project/backend
-
-# 執行所有整合測試
-pytest tests/integration -v
-
-# 執行特定模組的整合測試
-pytest tests/integration/test_animal_integration.py -v
-pytest tests/integration/test_application_integration.py -v
-pytest tests/integration/test_auth_integration.py -v
-pytest tests/integration/test_medical_integration.py -v
-pytest tests/integration/test_notification_integration.py -v
-pytest tests/integration/test_shelter_integration.py -v
-pytest tests/integration/test_user_integration.py -v
-```
-
 **使用 Docker 執行測試**:
 ```bash
 # 在專案根目錄
 cd code/project
 
 # 執行所有整合測試
-docker compose exec backend pytest tests/integration -v
+docker compose exec backend bash -c "export PYTHONPATH=/app:\$PYTHONPATH && pytest tests/integration -v"
 
 # 執行特定模組
-docker compose exec backend pytest tests/integration/test_animal_integration.py -v
+docker compose exec backend bash -c "export PYTHONPATH=/app:\$PYTHONPATH && pytest tests/integration/test_animal_integration.py -v"
 ```
 
 **整合測試成果**:
-- ✅ **100% 通過率**
-- 📊 **測試分佈**：
+- ✅ **高通過率** (認證系統完全修復)
+- ✅ **JWT 認證問題已解決** - 修正 token subject 類型錯誤
+- 📊 **核心功能測試**：
+  - Auth (認證系統): 7/7 tests ✅ 全部通過
   - Medical (醫療紀錄): 6 tests
   - Notification (通知系統): 8 tests
   - Shelter (收容所管理): 10 tests
   - User (使用者管理): 11 tests
-  - Animal (動物管理)、Application (申請管理)、Auth (認證系統)
+  - Animal (動物管理)、Application (申請管理)
 
 **整合測試說明**：
 - 整合測試使用 SQLite 記憶體資料庫（`:memory:`）
 - 驗證完整的 Route → Service → ORM → Database 流程
 - 測試涵蓋完整的 API 端點與業務流程
 - 每個測試獨立運行，確保測試間無互相影響
-- 已移除依賴未實作功能的測試（Job 系統、批次匯入等）
+- **已修復**: JWT token identity 類型問題（從整數改為字串）
 
 **前端測試**:
 ```bash

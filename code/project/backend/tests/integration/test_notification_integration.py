@@ -202,7 +202,7 @@ class TestNotificationCreation:
         """測試動物資料更新時通知關注者"""
         from flask_jwt_extended import create_access_token
         
-        token = create_access_token(identity=test_shelter_member.user_id)
+        token = create_access_token(identity=str(test_shelter_member.user_id))
         headers = {
             'Authorization': f'Bearer {token}',
             'Content-Type': 'application/json'

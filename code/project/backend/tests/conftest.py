@@ -2,12 +2,17 @@
 共用測試配置和 Fixtures
 用於單元測試和整合測試
 """
+import os
+import sys
 import pytest
 from app import create_app, db
 from app.models.user import User, UserRole
 from app.models.shelter import Shelter
 from app.models.animal import Animal, Species, Sex, AnimalStatus
 from datetime import datetime
+
+# Ensure the backend directory is in the Python path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 
 @pytest.fixture(scope='session')
@@ -171,7 +176,7 @@ def auth_headers(client, test_user):
     # 簡化版本，實際使用時需要調用登入 API
     from flask_jwt_extended import create_access_token
     
-    access_token = create_access_token(identity=test_user.user_id)
+    access_token = create_access_token(identity=str(test_user.user_id))
     return {
         'Authorization': f'Bearer {access_token}',
         'Content-Type': 'application/json'
@@ -183,7 +188,7 @@ def admin_headers(client, test_admin):
     """生成管理員認證 Headers"""
     from flask_jwt_extended import create_access_token
     
-    access_token = create_access_token(identity=test_admin.user_id)
+    access_token = create_access_token(identity=str(test_admin.user_id))
     return {
         'Authorization': f'Bearer {access_token}',
         'Content-Type': 'application/json'
@@ -195,7 +200,7 @@ def shelter_member_headers(client, test_shelter_member):
     """生成收容所會員認證 Headers"""
     from flask_jwt_extended import create_access_token
     
-    access_token = create_access_token(identity=test_shelter_member.user_id)
+    access_token = create_access_token(identity=str(test_shelter_member.user_id))
     return {
         'Authorization': f'Bearer {access_token}',
         'Content-Type': 'application/json'

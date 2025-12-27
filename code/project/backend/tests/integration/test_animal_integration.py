@@ -332,7 +332,7 @@ class TestAnimalUpdate:
         db_session.commit()
         
         # 使用另一個用戶的 token
-        token = create_access_token(identity=other_user.user_id)
+        token = create_access_token(identity=str(other_user.user_id))
         headers = {
             'Authorization': f'Bearer {token}',
             'Content-Type': 'application/json'
@@ -398,7 +398,7 @@ class TestAnimalDelete:
         db_session.add(other_user)
         db_session.commit()
         
-        token = create_access_token(identity=other_user.user_id)
+        token = create_access_token(identity=str(other_user.user_id))
         headers = {
             'Authorization': f'Bearer {token}',
             'Content-Type': 'application/json'
@@ -621,7 +621,7 @@ class TestAnimalStatusManagement:
         db_session.commit()
         
         # 使用管理員 token
-        token = create_access_token(identity=admin.user_id)
+        token = create_access_token(identity=str(admin.user_id))
         headers = {
             'Authorization': f'Bearer {token}',
             'Content-Type': 'application/json'
@@ -705,7 +705,7 @@ class TestAnimalStatusManagement:
         db_session.commit()
         
         # 使用管理員 token
-        token = create_access_token(identity=admin.user_id)
+        token = create_access_token(identity=str(admin.user_id))
         headers = {
             'Authorization': f'Bearer {token}',
             'Content-Type': 'application/json'
@@ -763,7 +763,7 @@ class TestAnimalStatusManagement:
         db_session.commit()
         
         # 使用管理員 token
-        token = create_access_token(identity=admin.user_id)
+        token = create_access_token(identity=str(admin.user_id))
         headers = {
             'Authorization': f'Bearer {token}',
             'Content-Type': 'application/json'
